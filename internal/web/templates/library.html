@@ -11,40 +11,48 @@
   <link rel="stylesheet" href="{{asset "app.css"}}">
   <script type="module" src="{{asset "upload.js"}}" defer></script>
 </head>
-<body class="bg-stone-50 text-stone-900 dark:bg-stone-950 dark:text-stone-100">
+<body class="app-page library-page">
   <header class="site-header">
     <div class="shell site-header-inner">
       <a class="brand" href="/">
-        <span class="brand-mark" aria-hidden="true">B</span>
-        <span>Bookshelf</span>
+        <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" role="img"><path d="M5 4.5h10.5A3.5 3.5 0 0 1 19 8v11.5H8.5A3.5 3.5 0 0 1 5 16V4.5Z"/><path d="M5 16a3.5 3.5 0 0 1 3.5-3.5H19"/></svg></span>
+        <span>Bookshelf <small>private library</small></span>
       </a>
-      <a class="button-quiet" href="/settings">Settings</a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="nav-link nav-link-active" href="/">Library</a>
+        <a class="nav-link" href="/settings">Settings</a>
+      </nav>
     </div>
   </header>
 
   <main class="shell library-main">
     {{if .Flash}}
-    <section class="mb-10 rounded-xl border border-amber-200 bg-amber-50 p-5 text-amber-950 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100" aria-label="Upload results">
-      <p class="eyebrow">Recently updated</p>
-      <ul class="mt-3 space-y-1 text-sm">
+    <section class="flash-message" aria-label="Upload results">
+      <span class="status-mark" aria-hidden="true">✓</span>
+      <div>
+        <p class="eyebrow">Recently updated</p>
+        <ul>
         {{range .Flash}}
         <li>{{.Filename}} — {{if eq .Status "created"}}added as {{.Title}}{{else}}{{.Message}}{{end}}</li>
         {{end}}
-      </ul>
+        </ul>
+      </div>
     </section>
     {{end}}
 
     <section class="library-hero" aria-labelledby="library-heading">
       <div class="library-hero-copy">
-        <p class="eyebrow">Your collection</p>
-        <h1 id="library-heading" class="mt-4">A quiet place for good books.</h1>
-        <p class="mt-6 max-w-xl text-base leading-7 text-stone-600 dark:text-stone-400">Pick up where you left off. Your reading position is saved here and restored on every device.</p>
-        <button id="upload-open" class="button-primary upload-trigger mt-8" type="button" aria-haspopup="dialog">Add a book</button>
+        <p class="eyebrow">The reading room</p>
+        <h1 id="library-heading">A quiet place<br><em>for good books.</em></h1>
+        <p class="hero-intro">Pick up where you left off. Your reading position is saved here and restored on every device.</p>
+        <button id="upload-open" class="button-primary upload-trigger" type="button" aria-haspopup="dialog"><span aria-hidden="true">+</span>Add a book</button>
       </div>
       <div class="library-hero-note">
-        <span class="eyebrow">In the library</span>
-        <strong class="mt-3">{{.Total}}</strong>
-        <p class="mt-1 text-sm text-stone-500">books ready to read</p>
+        <span class="eyebrow">Collection index</span>
+        <strong>{{.Total}}</strong>
+        <p>books ready to read</p>
+        <span class="hero-note-rule" aria-hidden="true"></span>
+        <span class="hero-note-meta">EPUB · PDF<br>synced across devices</span>
       </div>
     </section>
 
@@ -55,12 +63,13 @@
           <div class="upload-dialog-header">
             <div>
               <p class="eyebrow">Add to your collection</p>
-              <h2 id="upload-title" class="mt-2">Bring a book along.</h2>
+              <h2 id="upload-title">Bring a book along.</h2>
             </div>
-            <button class="dialog-close" type="button" data-dialog-close aria-label="Close upload dialog">×</button>
+            <button class="dialog-close" type="button" data-dialog-close aria-label="Close upload dialog"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
           </div>
-          <div class="mt-6">
+          <div class="upload-dialog-section">
             <label id="upload-dropzone" class="upload-dropzone" for="books">
+              <span class="dropzone-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14"/></svg></span>
               <strong>Drop files here or choose from your device</strong>
               <span>Up to 20 books at a time</span>
               <span class="format-list" aria-label="Supported formats"><span class="format-chip">EPUB</span><span class="format-chip">PDF</span></span>
@@ -68,10 +77,10 @@
             <input class="sr-only" id="books" name="books" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple required>
             <p id="upload-file-summary" class="upload-file-summary mt-3" aria-live="polite">No books selected yet</p>
           </div>
-          <label class="mt-5 block text-sm font-medium" for="category">Category <span class="font-normal text-stone-500">(optional)</span></label>
-          <input class="field mt-2" id="category" name="category" maxlength="100" placeholder="Uncategorized">
-          <p id="upload-status" class="min-h-5 mt-3 text-sm text-stone-500" aria-live="polite"></p>
-          <div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <label class="form-label" for="category">Category <span>(optional)</span></label>
+          <input class="field" id="category" name="category" maxlength="100" placeholder="Uncategorized">
+          <p id="upload-status" class="upload-status" aria-live="polite"></p>
+          <div class="dialog-actions">
             <button class="button-quiet" type="button" data-dialog-close>Cancel</button>
             <button class="button-primary" type="submit">Upload books</button>
           </div>
@@ -80,30 +89,30 @@
     </dialog>
 
     {{if .Continue}}
-    <section class="mt-16" aria-labelledby="continue-title">
-      <div class="section-heading"><h2 id="continue-title">Continue reading</h2><span class="text-sm text-stone-500">Your current shelf</span></div>
-      <div class="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+    <section class="library-section continue-section" aria-labelledby="continue-title">
+      <div class="section-heading"><div><p class="eyebrow">In progress</p><h2 id="continue-title">Continue reading</h2></div><span>Your current shelf</span></div>
+      <div class="continue-grid">
         {{range .Continue}}{{template "book-card" .}}{{end}}
       </div>
     </section>
     {{end}}
 
-    <section class="mt-16" aria-labelledby="library-title">
-      <div class="section-heading"><h2 id="library-title">All books <span class="ml-1 text-stone-400">{{.Total}}</span></h2></div>
-      <form class="mt-5 grid gap-3 sm:grid-cols-[1fr_auto_auto_auto]" method="get">
+    <section class="library-section all-books-section" aria-labelledby="library-title">
+      <div class="section-heading"><div><p class="eyebrow">The archive</p><h2 id="library-title">All books <span>{{.Total}}</span></h2></div></div>
+      <form class="library-filters" method="get">
         <label class="sr-only" for="q">Search title or author</label>
         <input class="field" id="q" name="q" maxlength="200" value="{{.Query}}" placeholder="Search title or author">
         <select class="field" name="category" aria-label="Category"><option value="">All categories</option>{{range .Categories}}<option {{if eq $.Category .}}selected{{end}}>{{.}}</option>{{end}}</select>
         <select class="field" name="sort" aria-label="Sort"><option value="added" {{if eq .Sort "added"}}selected{{end}}>Recently added</option><option value="title" {{if eq .Sort "title"}}selected{{end}}>Title</option><option value="last_read" {{if eq .Sort "last_read"}}selected{{end}}>Last read</option></select>
         <button class="button-quiet" type="submit">Apply</button>
       </form>
-      <div class="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {{range .Books}}{{template "book-card" .}}{{else}}<p class="col-span-full rounded-xl border border-dashed border-stone-300 p-10 text-center text-stone-500 dark:border-stone-700">No books match this view.</p>{{end}}
+      <div class="book-grid">
+        {{range .Books}}{{template "book-card" .}}{{else}}<p class="empty-state">No books match this view.</p>{{end}}
       </div>
       {{if gt .Pages 1}}
-      <nav class="mt-8 flex items-center justify-between" aria-label="Pagination">
+      <nav class="pagination" aria-label="Pagination">
         {{if .PrevURL}}<a class="button-quiet" href="{{.PrevURL}}">← Previous</a>{{else}}<span></span>{{end}}
-        <span class="text-sm text-stone-500">Page {{.Page}} of {{.Pages}}</span>
+        <span>Page {{.Page}} of {{.Pages}}</span>
         {{if .NextURL}}<a class="button-quiet" href="{{.NextURL}}">Next →</a>{{end}}
       </nav>
       {{end}}
@@ -116,13 +125,13 @@
 {{define "book-card"}}
 <article class="book-card group">
   <a href="/books/{{.ID}}/read" class="block focus-ring">
-    {{if .HasCover}}<img class="book-cover aspect-[3/4] w-full bg-stone-100 object-cover dark:bg-stone-800" src="/api/books/{{.ID}}/cover" alt="Cover of {{.Title}}" loading="lazy">{{else}}<div class="cover-placeholder"><span>{{.Title}}</span></div>{{end}}
-    <div class="p-4"><h3 class="line-clamp-2 font-semibold tracking-tight">{{.Title}}</h3><p class="mt-1 truncate text-sm text-stone-500">{{if .Author}}{{.Author}}{{else}}Unknown author{{end}}</p><div class="mt-4 h-1.5 overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800"><span class="block h-full bg-amber-500" style="width:{{percent .Percent}}%"></span></div></div>
+    {{if .HasCover}}<img class="book-cover" src="/api/books/{{.ID}}/cover" alt="Cover of {{.Title}}" loading="lazy">{{else}}<div class="cover-placeholder"><span>{{.Title}}</span></div>{{end}}
+    <div class="book-card-body"><div class="book-card-heading"><h3>{{.Title}}</h3>{{if .Category}}<span class="book-tag">{{.Category}}</span>{{end}}</div><p class="book-author">{{if .Author}}{{.Author}}{{else}}Unknown author{{end}}</p><div class="progress-meta"><span>{{percent .Percent}}% read</span><span class="progress-track"><span style="width:{{percent .Percent}}%"></span></span></div></div>
   </a>
-  <details class="border-t border-stone-100 p-4 text-sm dark:border-stone-800">
-    <summary class="cursor-pointer font-medium">Edit or delete</summary>
-    <form class="mt-4 space-y-3" method="post" action="/api/books/{{.ID}}"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="_method" value="PATCH"><label class="block">Title<input class="field mt-1" name="title" maxlength="512" required value="{{.Title}}"></label><label class="block">Author<input class="field mt-1" name="author" maxlength="512" value="{{.Author}}"></label><label class="block">Category<input class="field mt-1" name="category" maxlength="100" value="{{.Category}}"></label><button class="button-quiet" type="submit">Save metadata</button></form>
-    <form class="mt-5 border-t border-stone-100 pt-4 dark:border-stone-800" method="post" action="/api/books/{{.ID}}"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="_method" value="DELETE"><label class="flex items-start gap-2"><input class="mt-1" type="checkbox" name="confirm" value="yes" required><span>I understand this permanently removes the book and its reading position.</span></label><button class="button-danger mt-3" type="submit">Delete permanently</button></form>
+  <details class="book-actions">
+    <summary>Edit or delete</summary>
+    <form method="post" action="/api/books/{{.ID}}"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="_method" value="PATCH"><label>Title<input class="field" name="title" maxlength="512" required value="{{.Title}}"></label><label>Author<input class="field" name="author" maxlength="512" value="{{.Author}}"></label><label>Category<input class="field" name="category" maxlength="100" value="{{.Category}}"></label><button class="button-quiet" type="submit">Save metadata</button></form>
+    <form class="delete-form" method="post" action="/api/books/{{.ID}}"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="_method" value="DELETE"><label><input type="checkbox" name="confirm" value="yes" required><span>I understand this permanently removes the book and its reading position.</span></label><button class="button-danger" type="submit">Delete permanently</button></form>
   </details>
 </article>
 {{end}}
