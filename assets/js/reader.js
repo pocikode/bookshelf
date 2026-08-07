@@ -2,8 +2,6 @@ import ePub from "epubjs";
 import * as pdfjsLib from "pdfjs-dist";
 
 const app = document.querySelector("#reader-app");
-if (app) boot().catch(fail);
-
 const state = { phase: "booting", observed: null, acknowledged: null, pending: null, active: false, retry: 0, timer: null, rendition: null, pdf: null, pdfPage: 1, locations: null };
 const csrf = document.querySelector('meta[name="csrf-token"]')?.content || "";
 const id = Number(app?.dataset.bookId);
@@ -11,6 +9,7 @@ const format = app?.dataset.format;
 const endpoint = `/api/books/${id}/progress`;
 const sync = document.querySelector("#sync-state");
 const progressLabel = document.querySelector("#reader-progress");
+if (app) boot().catch(fail);
 
 async function boot() {
   const response = await fetch(endpoint, { credentials: "same-origin" });
@@ -52,8 +51,15 @@ async function bootPDF(saved) {
   state.pdf = await pdfjsLib.getDocument({ url: app.dataset.fileUrl, withCredentials: true }).promise;
   state.pdfPage = Math.min(Math.max(saved.page || 1, 1), state.pdf.numPages);
   await renderPDFPage();
-  const outline = await state.pdf.getOutline();
-  renderTOC(outline || [], async item => { const dest = typeof item.dest === "string" ? await state.pdf.getDestination(item.dest) : item.dest; if (dest) { const ref = await state.pdf.getPageIndex(dest[0]); state.pdfPage = ref + 1; await renderPDFPage(); observe({ page: state.pdfPage }); } });
+  // Some PDFs contain malformed or unsupported outline entries even though
+  // their pages are readable. The outline is optional, so it must not prevent
+  // the document itself from opening.
+  try {
+    const outline = await state.pdf.getOutline();
+    renderTOC(outline || [], async item => { const dest = typeof item.dest === "string" ? await state.pdf.getDestination(item.dest) : item.dest; if (dest) { const ref = await state.pdf.getPageIndex(dest[0]); state.pdfPage = ref + 1; await renderPDFPage(); observe({ page: state.pdfPage }); } });
+  } catch (error) {
+    console.warn("Could not load PDF outline", error);
+  }
 }
 
 async function renderPDFPage() {

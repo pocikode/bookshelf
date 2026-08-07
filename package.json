@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build:css": "bunx @tailwindcss/cli -i assets/css/app.css -o internal/web/dist/app.css --minify",
-    "build:js": "bun build assets/js/reader.js assets/js/upload.js --outdir internal/web/dist --target browser --minify && bun build node_modules/pdfjs-dist/build/pdf.worker.mjs --outfile internal/web/dist/pdf.worker.js --target browser --minify",
+    "build:js": "bun build assets/js/reader.js assets/js/upload.js --outdir internal/web/dist --target browser --minify && bun scripts/copy-pdf-worker.ts",
     "build": "bun scripts/build-assets.ts",
     "dev": "bun scripts/dev-assets.ts"
   },
