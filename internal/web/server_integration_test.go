@@ -269,7 +269,7 @@ func TestChangePasswordRequiresCSRFAndRevokesSessions(t *testing.T) {
 	if wrong.Code != http.StatusBadRequest || !strings.Contains(wrong.Body.String(), "Current password is incorrect") {
 		t.Fatalf("wrong password=%d %s", wrong.Code, wrong.Body.String())
 	}
-	success := app.request("POST", "/settings/password", values(app.csrf, "correct horse battery", "a sufficiently long password", "a sufficiently long password"), true)
+	success := app.request("POST", "/settings/password", values(app.csrf, "correct horse battery", "p@ssw0rd", "p@ssw0rd"), true)
 	if success.Code != http.StatusSeeOther || success.Header().Get("Location") != "/login" {
 		t.Fatalf("success=%d location=%q", success.Code, success.Header().Get("Location"))
 	}
@@ -281,7 +281,7 @@ func TestChangePasswordRequiresCSRFAndRevokesSessions(t *testing.T) {
 		t.Fatal("old session remained valid")
 	}
 	restarted := auth.New(app.repo, "old configured password", 90)
-	if err := restarted.Initialize(context.Background(), "old configured password"); err != nil || !restarted.ComparePassword("a sufficiently long password") {
+	if err := restarted.Initialize(context.Background(), "old configured password"); err != nil || !restarted.ComparePassword("p@ssw0rd") {
 		t.Fatalf("persisted password was not loaded: %v", err)
 	}
 }

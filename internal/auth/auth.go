@@ -24,7 +24,7 @@ var ErrInvalidSession = errors.New("invalid session")
 var ErrInvalidCurrentPassword = errors.New("invalid current password")
 var ErrPasswordTooShort = errors.New("password is too short")
 
-const MinPasswordLength = 12
+const MinPasswordLength = 8
 
 type repository interface {
 	CreateSession(context.Context, database.Session) error

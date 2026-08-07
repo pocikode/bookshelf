@@ -126,13 +126,13 @@ func TestChangePasswordPersistsAndRevokesSessions(t *testing.T) {
 	if err := svc.ChangePassword(context.Background(), "wrong", "a sufficiently long password"); !errors.Is(err, ErrInvalidCurrentPassword) {
 		t.Fatalf("wrong current password error=%v", err)
 	}
-	if err := svc.ChangePassword(context.Background(), "correct horse battery", "short"); !errors.Is(err, ErrPasswordTooShort) {
+	if err := svc.ChangePassword(context.Background(), "correct horse battery", "1234567"); !errors.Is(err, ErrPasswordTooShort) {
 		t.Fatalf("short password error=%v", err)
 	}
-	if err := svc.ChangePassword(context.Background(), "correct horse battery", "a sufficiently long password"); err != nil {
+	if err := svc.ChangePassword(context.Background(), "correct horse battery", "p@ssw0rd"); err != nil {
 		t.Fatal(err)
 	}
-	if !svc.ComparePassword("a sufficiently long password") || svc.ComparePassword("correct horse battery") {
+	if !svc.ComparePassword("p@ssw0rd") || svc.ComparePassword("correct horse battery") {
 		t.Fatal("password was not changed")
 	}
 	if _, err := svc.Resolve(context.Background(), session.Token); err == nil {
@@ -143,7 +143,7 @@ func TestChangePasswordPersistsAndRevokesSessions(t *testing.T) {
 	if err := restarted.Initialize(context.Background(), "old configured password"); err != nil {
 		t.Fatal(err)
 	}
-	if !restarted.ComparePassword("a sufficiently long password") {
+	if !restarted.ComparePassword("p@ssw0rd") {
 		t.Fatal("persisted password was not loaded")
 	}
 }
