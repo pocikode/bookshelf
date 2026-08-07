@@ -9,6 +9,7 @@ const format = app?.dataset.format;
 const endpoint = `/api/books/${id}/progress`;
 const sync = document.querySelector("#sync-state");
 const progressLabel = document.querySelector("#reader-progress");
+const pdfTones = ["paper", "sepia", "light"];
 if (app) boot().catch(fail);
 
 async function boot() {
@@ -45,6 +46,7 @@ async function bootEPUB(saved) {
 }
 
 async function bootPDF(saved) {
+  setPDFTone(localStorage.getItem("bookshelf:v1:pdf-tone") || "paper");
   pdfjsLib.GlobalWorkerOptions.workerSrc = app.dataset.workerUrl;
   const zoom = boundedNumber(localStorage.getItem("bookshelf:v1:pdf-zoom"), 1.25, .5, 3);
   state.pdfZoom = zoom;
@@ -102,6 +104,7 @@ async function save(beacon = false) {
 function installControls() {
   document.querySelector("#toc-toggle").addEventListener("click", event => { const toc = document.querySelector("#toc"); toc.hidden = !toc.hidden; event.currentTarget.setAttribute("aria-expanded", String(!toc.hidden)); });
   document.querySelector("#theme").addEventListener("click", () => { const dark = document.documentElement.classList.toggle("dark"); localStorage.setItem("bookshelf:v1:theme", dark ? "dark" : "light"); if (state.rendition) state.rendition.themes.default({ body: { color: dark ? "#f5f5f4" : "#1c1917", background: dark ? "#0c0a09" : "#fafaf9" } }); });
+  document.querySelector("#pdf-tone").addEventListener("click", () => { const current = app.dataset.pdfTone || "paper"; const next = pdfTones[(pdfTones.indexOf(current) + 1) % pdfTones.length]; setPDFTone(next); });
   document.querySelector("#increase").addEventListener("click", () => adjust(1));
   document.querySelector("#decrease").addEventListener("click", () => adjust(-1));
   document.addEventListener("keydown", async event => { if (["INPUT","SELECT","TEXTAREA"].includes(event.target.tagName)) return; if (["ArrowRight","PageDown"].includes(event.key)) await navigate(1); if (["ArrowLeft","PageUp"].includes(event.key)) await navigate(-1); });
@@ -116,5 +119,6 @@ function renderTOC(items, activate) { const list = document.querySelector("#toc-
 function percentFor(cfi) { if (!state.locations) return undefined; const value = state.locations.percentageFromCfi(cfi); return Number.isFinite(value) ? value : undefined; }
 function boundedNumber(raw, fallback, min, max) { const value = Number(raw); return Number.isFinite(value) && value >= min && value <= max ? value : fallback; }
 function setPhase(phase) { state.phase = phase; sync.textContent = phase[0].toUpperCase() + phase.slice(1); sync.dataset.state = phase; }
+function setPDFTone(tone) { const value = pdfTones.includes(tone) ? tone : "paper"; app.dataset.pdfTone = value; localStorage.setItem("bookshelf:v1:pdf-tone", value); const button = document.querySelector("#pdf-tone"); if (button) { const label = value[0].toUpperCase() + value.slice(1); button.textContent = label; button.setAttribute("aria-label", `PDF page background: ${label}. Activate to change`); button.title = `PDF page background: ${label}`; } }
 function fail(error) { console.error(error); app?.classList.remove("is-loading"); setPhase("failed"); const loading = document.querySelector("#reader-loading"); if (loading) loading.textContent = "This book could not be opened."; }
 function deviceLabel() { const ua = navigator.userAgent; const brands = navigator.userAgentData?.brands?.map(item => item.brand).join(" ") || ""; const platform = navigator.userAgentData?.platform || ""; const browser = /Edge|Microsoft Edge/i.test(brands) || /Edg\//.test(ua) ? "Edge" : /Firefox/i.test(brands) || /Firefox\//.test(ua) ? "Firefox" : /Chrom/i.test(brands) || /CriOS|Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Other"; const source = `${platform} ${ua}`; const os = /Android/i.test(source) ? "Android" : /iOS|iPad|iPhone|iPod/i.test(source) ? "iOS/iPadOS" : /macOS|Mac OS X/i.test(source) ? "macOS" : /Windows/i.test(source) ? "Windows" : /Linux/i.test(source) ? "Linux" : "Other"; return `${browser} on ${os}`.slice(0, 100); }
