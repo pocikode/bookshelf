@@ -215,11 +215,11 @@
   .reader-title p { margin-top: .1rem; color: var(--muted); font-family: var(--font-mono); font-size: .58rem; }
   .reader-controls { display: flex; gap: .35rem; }
   .sync-state { border-radius: 999px; background: var(--accent-soft); padding: .35rem .55rem; color: var(--accent); font-family: var(--font-mono); font-size: .58rem; white-space: nowrap; }
-  .reader-stage { position: relative; height: calc(100dvh - 4.25rem); overflow: auto; background: #f3efe6; }
-  #reader-app[data-format="epub"] .reader-stage { background: var(--canvas); }
-  #reader-app[data-pdf-tone="sepia"] .reader-stage { background: #e9dec8; }
-  #reader-app[data-pdf-tone="light"] .reader-stage { background: #ffffff; }
+  .reader-stage { position: relative; height: calc(100dvh - 4.25rem); overflow: auto; background: var(--canvas); }
   #reader-app[data-format="epub"] #epub-viewer { height: 100%; }
+  #pdf-page { width: fit-content; max-width: 100%; margin-inline: auto; background: #f3efe6; }
+  #reader-app[data-pdf-tone="sepia"] #pdf-page { background: #e9dec8; }
+  #reader-app[data-pdf-tone="light"] #pdf-page { background: #ffffff; }
   #pdf-canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; }
   #reader-app[data-pdf-tone="paper"] #pdf-canvas, #reader-app[data-pdf-tone="sepia"] #pdf-canvas { mix-blend-mode: multiply; }
   #reader-app[data-format="epub"] #pdf-tone { display: none; }
@@ -260,6 +260,7 @@
 }
 
 @media (max-width: 480px) {
+  .reader-toolbar { gap: .3rem; padding-inline: max(.6rem, env(safe-area-inset-right)) max(.6rem, env(safe-area-inset-left)); }
   .site-header-inner { min-height: 4rem; }
   .brand small { display: none; }
   .nav-link { padding-inline: .4rem; }
@@ -275,10 +276,11 @@
   .upload-dialog-header h2 { font-size: 1.9rem; }
   .dialog-actions { flex-direction: column-reverse; }
   .dialog-actions .button-primary, .dialog-actions .button-quiet { width: 100%; }
-  .reader-control-label, .reader-contents { display: none; }
-  .reader-title { padding-inline: .25rem; }
-  .reader-controls { gap: .2rem; }
-  .reader-control { min-width: 2.2rem; padding-inline: .45rem; }
+  .reader-control-label { display: none; }
+  .reader-title { padding-inline: .1rem; }
+  .reader-controls { flex: 0 0 auto; gap: .15rem; }
+  .reader-control { min-width: 2rem; padding-inline: .35rem; }
+  .reader-contents { min-width: auto; padding-inline: .5rem; white-space: nowrap; }
   .sync-state { position: fixed; right: .75rem; bottom: calc(.75rem + env(safe-area-inset-bottom)); z-index: 20; }
 }
 
