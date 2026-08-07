@@ -1,13 +1,10 @@
 package config
 
 import (
-	"errors"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
-	"unicode/utf8"
 )
 
 func TestFromEnv(t *testing.T) {
@@ -17,8 +14,6 @@ func TestFromEnv(t *testing.T) {
 		env  map[string]string
 		want string
 	}{
-		{"short unicode password", map[string]string{"APP_PASSWORD": "1234567890猫"}, "12 Unicode"},
-		{"placeholder case insensitive", map[string]string{"APP_PASSWORD": "BOOKSHELF"}, "placeholder"},
 		{"relative data", map[string]string{"APP_PASSWORD": "correct horse battery", "DATA_DIR": "data"}, "absolute"},
 		{"bad bool", map[string]string{"APP_PASSWORD": "correct horse battery", "TRUST_PROXY": "TRUE"}, "exactly true or false"},
 		{"bad level", map[string]string{"APP_PASSWORD": "correct horse battery", "LOG_LEVEL": "verbose"}, "LOG_LEVEL"},
@@ -76,69 +71,36 @@ func TestDefaultDataDirUsesXDGOnUnix(t *testing.T) {
 	}
 }
 
-func TestEnsurePasswordGeneratesOnceAndPersists(t *testing.T) {
+func TestPasswordDefaultsWhenAbsentOrEmpty(t *testing.T) {
 	t.Parallel()
-	dir := filepath.Join(t.TempDir(), "library")
-	env := map[string]string{"DATA_DIR": dir}
-	cfg, err := FromEnv(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Password != "" {
-		t.Fatalf("password = %q, want empty before EnsurePassword", cfg.Password)
-	}
-	if err := cfg.PrepareDataDir(); err != nil {
-		t.Fatal(err)
-	}
-	first, generated, err := cfg.EnsurePassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !generated {
-		t.Fatal("generated = false, want true on first run")
-	}
-	if utf8.RuneCountInString(first.Password) < 12 {
-		t.Fatalf("generated password %q is too short", first.Password)
-	}
-	info, err := os.Stat(first.BootstrapPasswordPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("mode = %v, want 0600", info.Mode().Perm())
-	}
-	second, generated, err := cfg.EnsurePassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if generated {
-		t.Fatal("generated = true, want false on a later run")
-	}
-	if second.Password != first.Password {
-		t.Fatalf("password changed across runs: %q then %q", first.Password, second.Password)
+	for name, env := range map[string]map[string]string{
+		"absent": {},
+		"empty":  {"APP_PASSWORD": ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := FromEnv(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Password != DefaultPassword || !cfg.UsingDefaultPassword() {
+				t.Fatalf("password = %q, want %q", cfg.Password, DefaultPassword)
+			}
+		})
 	}
 }
 
-func TestEnsurePasswordKeepsSuppliedValue(t *testing.T) {
+func TestSuppliedPasswordIsAcceptedUnvalidated(t *testing.T) {
 	t.Parallel()
-	dir := filepath.Join(t.TempDir(), "library")
-	env := map[string]string{"APP_PASSWORD": "correct horse battery", "DATA_DIR": dir}
-	cfg, err := FromEnv(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cfg.PrepareDataDir(); err != nil {
-		t.Fatal(err)
-	}
-	resolved, generated, err := cfg.EnsurePassword()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if generated || resolved.Password != env["APP_PASSWORD"] {
-		t.Fatalf("generated = %v, password = %q", generated, resolved.Password)
-	}
-	if _, err := os.Stat(resolved.BootstrapPasswordPath()); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("stat error = %v, want not-exist when APP_PASSWORD is supplied", err)
+	for _, password := range []string{"a", "bookshelf", "replace-me-with-a-strong-password", "1234567890猫"} {
+		env := map[string]string{"APP_PASSWORD": password}
+		cfg, err := FromEnv(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
+		if err != nil {
+			t.Fatalf("password %q rejected: %v", password, err)
+		}
+		if cfg.Password != password || cfg.UsingDefaultPassword() {
+			t.Fatalf("password = %q, want %q", cfg.Password, password)
+		}
 	}
 }
 

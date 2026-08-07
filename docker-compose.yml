@@ -2,9 +2,8 @@ services:
   bookshelf:
     image: ghcr.io/pocikode/bookshelf:latest
     restart: unless-stopped
-    # Every setting has a working default. Without APP_PASSWORD the service
-    # generates one on first start and logs it once; read it with
-    # `docker compose logs bookshelf`.
+    # Every setting has a working default. Without APP_PASSWORD the login
+    # password is 123456; set APP_PASSWORD before exposing this service.
     env_file:
       - path: .env
         required: false

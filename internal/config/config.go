@@ -1,7 +1,6 @@
 package config
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"math"
@@ -11,23 +10,21 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // DefaultPort is the listen port used when PORT is not supplied.
 const DefaultPort = 8070
 
 const (
-	appDirName            = "bookshelf"
-	bootstrapPasswordFile = ".bootstrap-password"
-	defaultMaxUploadMB    = 400
-	defaultSessionDays    = 90
+	appDirName         = "bookshelf"
+	defaultMaxUploadMB = 400
+	defaultSessionDays = 90
 )
 
-var weakPasswords = map[string]struct{}{
-	"password": {}, "changeme": {}, "change-me": {}, "bookshelf": {},
-	"replace-me": {}, "replace-me-with-a-strong-password": {},
-}
+// DefaultPassword is used when APP_PASSWORD is not supplied. It is deliberately
+// trivial so a fresh install needs no configuration at all; anything reachable
+// beyond a trusted network should set APP_PASSWORD.
+const DefaultPassword = "123456"
 
 type Config struct {
 	Password       string
@@ -44,19 +41,11 @@ func Load() (Config, error) {
 }
 
 func FromEnv(lookup func(string) (string, bool)) (Config, error) {
-	// An absent APP_PASSWORD is resolved later by EnsurePassword, which needs a
-	// prepared DataDir. A supplied one is validated here so a bad value fails
-	// before any directory work happens.
+	// Any supplied APP_PASSWORD is used exactly as given, with no strength or
+	// content rules. An absent or empty one falls back to DefaultPassword.
 	password, ok := lookup("APP_PASSWORD")
 	if !ok || password == "" {
-		password = ""
-	} else {
-		if _, rejected := weakPasswords[strings.ToLower(password)]; rejected {
-			return Config{}, errors.New("APP_PASSWORD must not be a documented placeholder")
-		}
-		if utf8.RuneCountInString(password) < 12 {
-			return Config{}, errors.New("APP_PASSWORD must contain at least 12 Unicode code points")
-		}
+		password = DefaultPassword
 	}
 
 	dataDir, err := resolveDataDir(lookup)
@@ -97,49 +86,10 @@ func FromEnv(lookup func(string) (string, bool)) (Config, error) {
 	}, nil
 }
 
-// EnsurePassword fills in Password when APP_PASSWORD was not supplied, so a
-// freshly pulled image starts with no configuration at all. The password is
-// generated once and persisted under DataDir at 0600, which makes it stable
-// across restarts and unique per deployment. The bool reports whether this call
-// created it; callers surface that to the operator, since a generated password
-// has no other delivery channel. Requires PrepareDataDir to have run.
-func (c Config) EnsurePassword() (Config, bool, error) {
-	if c.Password != "" {
-		return c, false, nil
-	}
-	path := filepath.Join(c.DataDir, bootstrapPasswordFile)
-	stored, err := os.ReadFile(path)
-	switch {
-	case err == nil:
-		password := strings.TrimRight(string(stored), "\r\n")
-		if utf8.RuneCountInString(password) < 12 {
-			return Config{}, false, fmt.Errorf("%s is unusable: set APP_PASSWORD, or delete the file to regenerate", path)
-		}
-		c.Password = password
-		return c, false, nil
-	case !errors.Is(err, os.ErrNotExist):
-		return Config{}, false, fmt.Errorf("read %s: %w", path, err)
-	}
-
-	password := rand.Text()
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return Config{}, false, fmt.Errorf("create %s: %w", path, err)
-	}
-	if _, err := file.WriteString(password + "\n"); err != nil {
-		file.Close()
-		return Config{}, false, fmt.Errorf("write %s: %w", path, err)
-	}
-	if err := file.Close(); err != nil {
-		return Config{}, false, fmt.Errorf("write %s: %w", path, err)
-	}
-	c.Password = password
-	return c, true, nil
-}
-
-// BootstrapPasswordPath is where a generated password is stored.
-func (c Config) BootstrapPasswordPath() string {
-	return filepath.Join(c.DataDir, bootstrapPasswordFile)
+// UsingDefaultPassword reports whether the effective password is the built-in
+// default, so startup can warn the operator.
+func (c Config) UsingDefaultPassword() bool {
+	return c.Password == DefaultPassword
 }
 
 func (c Config) PrepareDataDir() error {

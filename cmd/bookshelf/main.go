@@ -62,16 +62,10 @@ func serve() error {
 	}
 	logger := newLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
-	cfg, generatedPassword, err := cfg.EnsurePassword()
-	if err != nil {
-		return err
-	}
-	if generatedPassword {
-		logger.Warn("password_generated",
-			"event", "password_generated",
-			"password", cfg.Password,
-			"stored_at", cfg.BootstrapPasswordPath(),
-			"advice", "APP_PASSWORD was not set; log in with this password and replace it by setting APP_PASSWORD")
+	if cfg.UsingDefaultPassword() {
+		logger.Warn("default_password_in_use",
+			"event", "default_password_in_use",
+			"advice", "APP_PASSWORD was not set; the built-in default password is in use, set APP_PASSWORD before exposing this service")
 	}
 	startupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

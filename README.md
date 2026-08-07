@@ -8,13 +8,13 @@ Bookshelf is a single-user, self-hosted EPUB/PDF library. Reading position is st
 docker compose up -d
 ```
 
-No configuration is required. Every variable has a default, and on first start the service generates a random password, stores it at `$DATA_DIR/.bootstrap-password` (mode 0600), and logs it once:
+No configuration is required. Every variable has a default, and without `APP_PASSWORD` the login password is `123456`. Startup logs a warning while that default is in use:
 
 ```sh
-docker compose logs bookshelf | grep password_generated
+docker compose logs bookshelf | grep default_password_in_use
 ```
 
-To choose the password yourself, copy `.env.example` to `.env` and set `APP_PASSWORD` to a strong value of at least 12 characters. A supplied `APP_PASSWORD` always wins over the generated one; it does not need to match the stored file.
+To choose the password yourself, copy `.env.example` to `.env` and set `APP_PASSWORD`. Any non-empty value is accepted exactly as supplied — there is no length or strength check — so pick a strong one before the service is reachable by anyone else.
 
 The native `bookshelf serve`, `go run ./cmd/bookshelf`, and `make dev` paths also load `.env` from the current working directory. Values already exported by the shell take precedence over the file. The container continues to receive its environment through Compose or the container runtime.
 
