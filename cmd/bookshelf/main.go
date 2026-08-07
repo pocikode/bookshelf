@@ -62,6 +62,17 @@ func serve() error {
 	}
 	logger := newLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
+	cfg, generatedPassword, err := cfg.EnsurePassword()
+	if err != nil {
+		return err
+	}
+	if generatedPassword {
+		logger.Warn("password_generated",
+			"event", "password_generated",
+			"password", cfg.Password,
+			"stored_at", cfg.BootstrapPasswordPath(),
+			"advice", "APP_PASSWORD was not set; log in with this password and replace it by setting APP_PASSWORD")
+	}
 	startupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	db, err := database.Open(startupCtx, cfg.DataDir)
@@ -142,7 +153,7 @@ func sessionSweeper(ctx context.Context, repo *database.Repository, logger *slog
 	}
 }
 func healthcheck() error {
-	port := 8080
+	port := config.DefaultPort
 	if raw := os.Getenv("PORT"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 || parsed > 65535 {

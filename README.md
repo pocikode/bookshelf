@@ -4,23 +4,29 @@ Bookshelf is a single-user, self-hosted EPUB/PDF library. Reading position is st
 
 ## Deploy
 
-Create `.env` from `.env.example`, replace `APP_PASSWORD` with a strong password of at least 12 characters, then run:
-
 ```sh
 docker compose up -d
 ```
 
+No configuration is required. Every variable has a default, and on first start the service generates a random password, stores it at `$DATA_DIR/.bootstrap-password` (mode 0600), and logs it once:
+
+```sh
+docker compose logs bookshelf | grep password_generated
+```
+
+To choose the password yourself, copy `.env.example` to `.env` and set `APP_PASSWORD` to a strong value of at least 12 characters. A supplied `APP_PASSWORD` always wins over the generated one; it does not need to match the stored file.
+
 The native `bookshelf serve`, `go run ./cmd/bookshelf`, and `make dev` paths also load `.env` from the current working directory. Values already exported by the shell take precedence over the file. The container continues to receive its environment through Compose or the container runtime.
 
-The application listens on loopback port 8080 by default. Put a trusted TLS proxy such as Caddy, Cloudflare Tunnel, or Tailscale in front of it. Leave `TRUST_PROXY=false` unless the application port is reachable only through a proxy you control. When enabled, Bookshelf trusts the leftmost `X-Forwarded-For` address and `X-Forwarded-Proto` supplied by that proxy.
+The application listens on loopback port 8070 by default. Put a trusted TLS proxy such as Caddy, Cloudflare Tunnel, or Tailscale in front of it. Leave `TRUST_PROXY=false` unless the application port is reachable only through a proxy you control. When enabled, Bookshelf trusts the leftmost `X-Forwarded-For` address and `X-Forwarded-Proto` supplied by that proxy.
 
-For Caddy on the same host, proxy the public HTTPS site to `127.0.0.1:8080`; Caddy supplies the forwarding headers and the Compose binding keeps direct traffic off the application port. For Cloudflare Tunnel, target the same loopback HTTP service and ensure no public firewall rule exposes port 8080. For Tailscale, publish the loopback service only to the tailnet. Set `TRUST_PROXY=true` only after that direct-access isolation is in place; otherwise clients can spoof both their limiter identity and effective HTTPS scheme.
+For Caddy on the same host, proxy the public HTTPS site to `127.0.0.1:8070`; Caddy supplies the forwarding headers and the Compose binding keeps direct traffic off the application port. For Cloudflare Tunnel, target the same loopback HTTP service and ensure no public firewall rule exposes port 8070. For Tailscale, publish the loopback service only to the tailnet. Set `TRUST_PROXY=true` only after that direct-access isolation is in place; otherwise clients can spoof both their limiter identity and effective HTTPS scheme.
 
-The published container is multi-architecture (`linux/amd64` and `linux/arm64`), runs as UID 65532, and needs write access only to `/data`. Bun and Go are build-time requirements; neither is needed to deploy the image.
+The published container is multi-architecture (`linux/amd64` and `linux/arm64`), runs as UID 65532, and needs write access only to `/app/data`. Bun and Go are build-time requirements; neither is needed to deploy the image.
 
 ## Backup and restore
 
-All durable state—SQLite, books, covers, and recovery metadata—is under `/data`. Back up the complete volume while the service is stopped, or use SQLite's online backup tooling and copy the file directories consistently. Restore by mounting the copied directory at `/data` and starting the same or a newer image. Never restore only `bookshelf.db` without its `books/` and `covers/` directories.
+All durable state—SQLite, books, covers, and recovery metadata—is under the data directory (`/app/data` in the container). Back up the complete volume while the service is stopped, or use SQLite's online backup tooling and copy the file directories consistently. Restore by mounting the copied directory at `/app/data` and starting the same or a newer image. Never restore only `bookshelf.db` without its `books/` and `covers/` directories.
 
 Changing `APP_PASSWORD` invalidates every existing session. The Settings page can also revoke the current session or all sessions.
 
@@ -35,7 +41,7 @@ go test -race ./...
 go run ./cmd/bookshelf
 ```
 
-The runtime requires `APP_PASSWORD`; for local development set `DATA_DIR` to an absolute writable directory. `bun run build` deletes and recreates the embedded asset output, validates all four outputs, and rejects a suspiciously small stylesheet.
+No variable is required. `DATA_DIR` falls back to the platform user data directory (`$XDG_DATA_HOME/bookshelf` or `~/.local/share/bookshelf` on Linux, `~/Library/Application Support/bookshelf` on macOS, `%LOCALAPPDATA%\bookshelf` on Windows), and the container image pins it to `/app/data`. Set `DATA_DIR` explicitly to keep development data elsewhere. `bun run build` deletes and recreates the embedded asset output, validates all four outputs, and rejects a suspiciously small stylesheet.
 
 ## Security notes
 
@@ -46,4 +52,4 @@ The runtime requires `APP_PASSWORD`; for local development set `DATA_DIR` to an 
 - Bookshelf serves plain HTTP. TLS termination and network access control belong at the trusted proxy.
 - Keep the application origin private: the browser reader has no CDN or external runtime dependency.
 
-Before an upgrade, back up `/data`. Migrations run automatically and transactionally at startup. Keep the previous image available for operational rollback; do not downgrade a migrated data directory without restoring its matching backup.
+Before an upgrade, back up the data directory. Migrations run automatically and transactionally at startup. Keep the previous image available for operational rollback; do not downgrade a migrated data directory without restoring its matching backup.
