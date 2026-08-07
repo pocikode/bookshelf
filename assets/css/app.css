@@ -1,0 +1,69 @@
+@import "tailwindcss";
+@source "../../internal/web/templates/**/*.html";
+@source "../js/**/*.js";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --color-ink: #1c1917;
+  --color-paper: #fafaf9;
+  --color-accent: #d97706;
+}
+
+@layer base {
+  * { box-sizing: border-box; }
+  html { font-family: var(--font-sans); text-rendering: optimizeLegibility; }
+  body { margin: 0; min-width: 320px; }
+  button, input, select { font: inherit; }
+  a { color: inherit; text-decoration: none; }
+  :focus-visible { outline: 3px solid #f59e0b; outline-offset: 3px; }
+}
+
+@layer components {
+  .shell { width: min(100% - 2rem, 80rem); margin-inline: auto; }
+  .eyebrow { color: #b45309; font-size: .72rem; font-weight: 750; letter-spacing: .14em; text-transform: uppercase; }
+  .field { width: 100%; min-height: 2.75rem; border: 1px solid #d6d3d1; border-radius: .75rem; background: white; padding: .65rem .8rem; color: #1c1917; }
+  .dark .field { border-color: #44403c; background: #1c1917; color: #f5f5f4; }
+  .button-primary, .button-quiet, .button-danger { min-height: 2.75rem; align-items: center; justify-content: center; border-radius: .75rem; padding: .65rem 1rem; font-size: .875rem; font-weight: 700; transition: background-color .15s ease, color .15s ease; }
+  .button-primary { border: 1px solid #1c1917; background: #1c1917; color: white; }
+  .dark .button-primary { border-color: #f5f5f4; background: #f5f5f4; color: #1c1917; }
+  .button-quiet { border: 1px solid #d6d3d1; background: transparent; }
+  .dark .button-quiet { border-color: #57534e; }
+  .button-danger { border: 1px solid #fecaca; color: #b91c1c; }
+  .dark .button-danger { border-color: #7f1d1d; color: #fca5a5; }
+  .section-heading { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #e7e5e4; padding-bottom: .8rem; }
+  .dark .section-heading { border-color: #292524; }
+  .section-heading h2 { font-size: 1.35rem; font-weight: 700; letter-spacing: -.02em; }
+  .cover-placeholder { display: grid; aspect-ratio: 3/4; place-items: center; background: #e7e5e4; padding: 2rem; text-align: center; font-family: Georgia, serif; font-size: 1.35rem; font-weight: 700; }
+  .dark .cover-placeholder { background: #292524; }
+  .reader-page { overflow: hidden; background: #fafaf9; color: #1c1917; }
+  .dark .reader-page { background: #0c0a09; color: #f5f5f4; }
+  .reader-app { height: 100dvh; opacity: 1; transition: opacity .16s ease; }
+  .reader-app.is-loading { opacity: 0; }
+  .reader-toolbar { position: relative; z-index: 20; display: flex; height: 3.75rem; align-items: center; gap: .5rem; border-bottom: 1px solid #e7e5e4; background: rgba(250,250,249,.96); padding: .5rem max(.75rem, env(safe-area-inset-right)) .5rem max(.75rem, env(safe-area-inset-left)); }
+  .dark .reader-toolbar { border-color: #292524; background: rgba(12,10,9,.96); }
+  .reader-control { display: inline-grid; min-width: 2.75rem; min-height: 2.75rem; place-items: center; border: 1px solid #d6d3d1; border-radius: .7rem; background: transparent; font-size: .8rem; }
+  .dark .reader-control { border-color: #44403c; }
+  .reader-stage { position: relative; height: calc(100dvh - 3.75rem); overflow: auto; }
+  #epub-viewer { height: 100%; }
+  #pdf-canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  #reader-loading { position: absolute; inset: 0; display: grid; place-items: center; color: #78716c; }
+  .reader-toc { position: fixed; z-index: 30; top: 3.75rem; bottom: 0; left: 0; width: min(24rem, 88vw); overflow: auto; border-right: 1px solid #d6d3d1; background: #fafaf9; padding: 1rem; }
+  .dark .reader-toc { border-color: #44403c; background: #1c1917; }
+  .reader-toc a { display: block; border-radius: .5rem; padding: .6rem; font-size: .875rem; }
+  .reader-toc a:hover { background: #f5f5f4; }
+  .dark .reader-toc a:hover { background: #292524; }
+  .sync-state { border-radius: 999px; background: #e7e5e4; padding: .35rem .6rem; font-size: .7rem; white-space: nowrap; }
+  .dark .sync-state { background: #292524; }
+}
+
+@media (max-width: 640px) {
+  .reader-toolbar { gap: .3rem; }
+  #toc-toggle { width: 2.75rem; overflow: hidden; color: transparent; }
+  #toc-toggle::before { content: "☰"; color: currentColor; color: #57534e; }
+  .sync-state { position: fixed; right: .75rem; bottom: calc(.75rem + env(safe-area-inset-bottom)); z-index: 20; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
+}

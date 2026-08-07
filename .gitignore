@@ -1,0 +1,6 @@
+/node_modules/
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep
+/.env
+/bookshelf
+/graphify-out/

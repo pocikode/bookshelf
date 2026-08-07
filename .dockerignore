@@ -1,0 +1,8 @@
+.git
+.github
+graphify-out
+node_modules
+internal/web/dist
+bookshelf
+.env
+*.db
