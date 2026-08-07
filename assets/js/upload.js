@@ -28,6 +28,13 @@ if (form) {
   document.querySelectorAll("[data-dialog-close]").forEach(button => button.addEventListener("click", () => dialog.close()));
 }
 
+const libraryResults = document.querySelector("#library-results");
+if (libraryResults) bindLibraryFilters(libraryResults);
+window.addEventListener("popstate", () => {
+  const results = document.querySelector("#library-results");
+  if (results) updateLibraryResults(new URL(window.location.href), results, false);
+});
+
 async function submit(event) {
   const input = form.querySelector("#books");
   const files = [...input.files];
@@ -106,6 +113,38 @@ function formatFileSize(bytes) {
 }
 
 function isSupported(file) { return /\.(epub|pdf)$/i.test(file.name); }
+
+function bindLibraryFilters(results) {
+  const filterForm = results.querySelector(".library-filters");
+  filterForm.addEventListener("submit", event => {
+    event.preventDefault();
+    const url = new URL(window.location.href);
+    url.search = new URLSearchParams(new FormData(filterForm)).toString();
+    url.searchParams.delete("page");
+    updateLibraryResults(url, results);
+  });
+  results.querySelectorAll(".pagination a").forEach(link => link.addEventListener("click", event => {
+    event.preventDefault();
+    updateLibraryResults(new URL(link.href), results);
+  }));
+}
+
+async function updateLibraryResults(url, results, pushHistory = true) {
+  results.setAttribute("aria-busy", "true");
+  try {
+    const response = await fetch(url, { headers: { "X-Requested-With": "fetch" }, credentials: "same-origin" });
+    if (!response.ok) throw new Error("Unable to update the library");
+    const html = await response.text();
+    const nextResults = new DOMParser().parseFromString(html, "text/html").querySelector("#library-results");
+    if (!nextResults) throw new Error("Invalid library response");
+    if (pushHistory) history.pushState({}, "", url);
+    results.replaceWith(nextResults);
+    bindLibraryFilters(nextResults);
+  } catch (error) {
+    results.removeAttribute("aria-busy");
+    window.dispatchEvent(new CustomEvent("bookshelf:filter-error", { detail: error.message }));
+  }
+}
 
 async function renderCover(file) {
   const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;

@@ -98,29 +98,33 @@
     </section>
     {{end}}
 
-    <section class="library-section all-books-section" aria-labelledby="library-title">
-      <div class="section-heading"><div><p class="eyebrow">The archive</p><h2 id="library-title">All books <span>{{.Total}}</span></h2></div></div>
-      <form class="library-filters" method="get">
-        <label class="sr-only" for="q">Search title or author</label>
-        <input class="field" id="q" name="q" maxlength="200" value="{{.Query}}" placeholder="Search title or author">
-        <select class="field" name="category" aria-label="Category"><option value="">All categories</option>{{range .Categories}}<option {{if eq $.Category .}}selected{{end}}>{{.}}</option>{{end}}</select>
-        <select class="field" name="sort" aria-label="Sort"><option value="added" {{if eq .Sort "added"}}selected{{end}}>Recently added</option><option value="title" {{if eq .Sort "title"}}selected{{end}}>Title</option><option value="last_read" {{if eq .Sort "last_read"}}selected{{end}}>Last read</option></select>
-        <button class="button-quiet" type="submit">Apply</button>
-      </form>
-      <div class="book-grid">
-        {{range .Books}}{{template "book-card" .}}{{else}}<p class="empty-state">No books match this view.</p>{{end}}
-      </div>
-      {{if gt .Pages 1}}
-      <nav class="pagination" aria-label="Pagination">
-        {{if .PrevURL}}<a class="button-quiet" href="{{.PrevURL}}">← Previous</a>{{else}}<span></span>{{end}}
-        <span>Page {{.Page}} of {{.Pages}}</span>
-        {{if .NextURL}}<a class="button-quiet" href="{{.NextURL}}">Next →</a>{{end}}
-      </nav>
-      {{end}}
-    </section>
+    {{template "library-results" .}}
   </main>
 </body>
 </html>
+{{end}}
+
+{{define "library-results"}}
+<section id="library-results" class="library-section all-books-section" aria-labelledby="library-title" aria-live="polite">
+  <div class="section-heading"><div><p class="eyebrow">The archive</p><h2 id="library-title">All books <span>{{.Total}}</span></h2></div></div>
+  <form class="library-filters" method="get">
+    <label class="sr-only" for="q">Search title or author</label>
+    <input class="field" id="q" name="q" maxlength="200" value="{{.Query}}" placeholder="Search title or author">
+    <select class="field" name="category" aria-label="Category"><option value="">All categories</option>{{range .Categories}}<option {{if eq $.Category .}}selected{{end}}>{{.}}</option>{{end}}</select>
+    <select class="field" name="sort" aria-label="Sort"><option value="added" {{if eq .Sort "added"}}selected{{end}}>Recently added</option><option value="title" {{if eq .Sort "title"}}selected{{end}}>Title</option><option value="last_read" {{if eq .Sort "last_read"}}selected{{end}}>Last read</option></select>
+    <button class="button-quiet" type="submit">Apply</button>
+  </form>
+  <div class="book-grid">
+    {{range .Books}}{{template "book-card" .}}{{else}}<p class="empty-state">No books match this view.</p>{{end}}
+  </div>
+  {{if gt .Pages 1}}
+  <nav class="pagination" aria-label="Pagination">
+    {{if .PrevURL}}<a class="button-quiet" href="{{.PrevURL}}">← Previous</a>{{else}}<span></span>{{end}}
+    <span>Page {{.Page}} of {{.Pages}}</span>
+    {{if .NextURL}}<a class="button-quiet" href="{{.NextURL}}">Next →</a>{{end}}
+  </nav>
+  {{end}}
+</section>
 {{end}}
 
 {{define "book-card"}}

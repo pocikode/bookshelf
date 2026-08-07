@@ -147,6 +147,23 @@ func TestAuthenticatedFileRangesAndConditionals(t *testing.T) {
 		t.Fatalf("If-Range=%d", ifRange.Code)
 	}
 }
+
+func TestLibraryFilterFragment(t *testing.T) {
+	app := newIntegrationApp(t)
+	defer app.dbClose()
+	req := httptest.NewRequest("GET", "/?q=Range", nil)
+	req.Header.Set("X-Requested-With", "fetch")
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: app.session.Token})
+	rec := httptest.NewRecorder()
+	app.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("filter fragment status=%d", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "<!doctype html>") || !strings.Contains(rec.Body.String(), `id="library-results"`) || !strings.Contains(rec.Body.String(), "Range Test") {
+		t.Fatalf("unexpected filter fragment: %s", rec.Body.String())
+	}
+}
+
 func TestProgressCSRFAndServerDerivedPDFPercent(t *testing.T) {
 	app := newIntegrationApp(t)
 	defer app.dbClose()

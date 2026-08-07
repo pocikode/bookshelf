@@ -333,6 +333,10 @@ func (s *Server) libraryPage(w http.ResponseWriter, r *http.Request) {
 	if page < pages {
 		view.NextURL = pageURL(r, page+1)
 	}
+	if r.Header.Get("X-Requested-With") == "fetch" {
+		s.render(w, "library-results", view)
+		return
+	}
 	s.render(w, "library", view)
 }
 func pageURL(r *http.Request, page int) string {
