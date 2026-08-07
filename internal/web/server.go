@@ -60,7 +60,7 @@ func NewServer(dep Dependencies) (http.Handler, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = assets.Require("app.css", "reader.js", "upload.js", "pdf.worker.js"); err != nil {
+	if err = assets.Require("app.css", "reader.js", "upload.js", "pdf.worker.js", "favicon.svg"); err != nil {
 		return nil, err
 	}
 	funcs := template.FuncMap{"asset": assets.URL, "percent": func(v float64) string { return strconv.FormatFloat(math.Max(0, math.Min(100, v*100)), 'f', 1, 64) }}
@@ -89,6 +89,7 @@ func (s *Server) routes() http.Handler {
 		h.Use(s.requireHTML)
 		h.Get("/", s.libraryPage)
 		h.Get("/settings", s.settings)
+		h.Post("/settings/password", s.changePassword)
 		h.Post("/logout", s.logout)
 		h.Post("/logout/all", s.logoutAll)
 		h.Get("/books/{id}/read", s.readerPage)
@@ -341,6 +342,30 @@ func pageURL(r *http.Request, page int) string {
 }
 func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "settings", map[string]any{"CSRF": s.dep.Auth.CSRFToken(currentSession(r))})
+}
+func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
+	if !s.validFormCSRF(w, r) {
+		return
+	}
+	current, next, confirmation := r.FormValue("current_password"), r.FormValue("new_password"), r.FormValue("new_password_confirmation")
+	if next != confirmation {
+		s.htmlError(w, http.StatusBadRequest, "New passwords do not match")
+		return
+	}
+	if err := s.dep.Auth.ChangePassword(r.Context(), current, next); err != nil {
+		switch {
+		case errors.Is(err, auth.ErrInvalidCurrentPassword):
+			s.htmlError(w, http.StatusBadRequest, "Current password is incorrect")
+		case errors.Is(err, auth.ErrPasswordTooShort):
+			s.htmlError(w, http.StatusBadRequest, fmt.Sprintf("New password must be at least %d characters", auth.MinPasswordLength))
+		default:
+			s.dep.Logger.Error("password_change_failed", "event", "password_change_failed", "error", err)
+			s.htmlError(w, http.StatusInternalServerError, "Password could not be changed")
+		}
+		return
+	}
+	auth.ClearCookie(w, auth.IsSecure(r, s.dep.Config.TrustProxy))
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if !s.validFormCSRF(w, r) {

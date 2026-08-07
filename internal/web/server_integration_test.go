@@ -12,6 +12,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,6 +35,7 @@ type integrationApp struct {
 	book    database.Book
 	content []byte
 	repo    *database.Repository
+	auth    *auth.Service
 	dbClose func()
 }
 
@@ -65,6 +67,9 @@ func newIntegrationApp(t *testing.T) *integrationApp {
 		t.Fatal(err)
 	}
 	authSvc := auth.New(repo, cfg.Password, cfg.SessionDays)
+	if err := authSvc.Initialize(context.Background(), cfg.Password); err != nil {
+		t.Fatal(err)
+	}
 	session, err := authSvc.Create(context.Background(), "test")
 	if err != nil {
 		t.Fatal(err)
@@ -73,11 +78,14 @@ func newIntegrationApp(t *testing.T) *integrationApp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &integrationApp{handler: handler, session: session, csrf: authSvc.CSRFToken(session), book: book, content: content, repo: repo, dbClose: func() { db.Close() }}
+	return &integrationApp{handler: handler, session: session, csrf: authSvc.CSRFToken(session), book: book, content: content, repo: repo, auth: authSvc, dbClose: func() { db.Close() }}
 }
 func (a *integrationApp) request(method, path string, body io.Reader, authn bool) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, path, body)
 	req.RemoteAddr = "192.0.2.1:1234"
+	if body != nil {
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
 	if authn {
 		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: a.session.Token})
 	}
@@ -235,6 +243,46 @@ func TestIndexedEPUBUploadMetadataDuplicateAndFlash(t *testing.T) {
 	libraryPage := app.request("GET", "/", nil, true)
 	if libraryPage.Code != 200 || !strings.Contains(libraryPage.Body.String(), "Already in library as The Extracted Title") {
 		t.Fatalf("flash missing: %d", libraryPage.Code)
+	}
+}
+
+func TestChangePasswordRequiresCSRFAndRevokesSessions(t *testing.T) {
+	app := newIntegrationApp(t)
+	defer app.dbClose()
+	settings := app.request("GET", "/settings", nil, true)
+	if settings.Code != http.StatusOK || !strings.Contains(settings.Body.String(), `action="/settings/password"`) {
+		t.Fatalf("password form missing: %d", settings.Code)
+	}
+	values := func(csrf, current, next, confirmation string) io.Reader {
+		return strings.NewReader(url.Values{
+			"csrf_token":                {csrf},
+			"current_password":          {current},
+			"new_password":              {next},
+			"new_password_confirmation": {confirmation},
+		}.Encode())
+	}
+	withoutCSRF := app.request("POST", "/settings/password", values("", "correct horse battery", "a sufficiently long password", "a sufficiently long password"), true)
+	if withoutCSRF.Code != http.StatusForbidden {
+		t.Fatalf("without csrf=%d", withoutCSRF.Code)
+	}
+	wrong := app.request("POST", "/settings/password", values(app.csrf, "wrong", "a sufficiently long password", "a sufficiently long password"), true)
+	if wrong.Code != http.StatusBadRequest || !strings.Contains(wrong.Body.String(), "Current password is incorrect") {
+		t.Fatalf("wrong password=%d %s", wrong.Code, wrong.Body.String())
+	}
+	success := app.request("POST", "/settings/password", values(app.csrf, "correct horse battery", "a sufficiently long password", "a sufficiently long password"), true)
+	if success.Code != http.StatusSeeOther || success.Header().Get("Location") != "/login" {
+		t.Fatalf("success=%d location=%q", success.Code, success.Header().Get("Location"))
+	}
+	cookies := success.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != auth.CookieName || cookies[0].MaxAge >= 0 {
+		t.Fatalf("cookie was not cleared: %+v", cookies)
+	}
+	if _, err := app.auth.Resolve(context.Background(), app.session.Token); err == nil {
+		t.Fatal("old session remained valid")
+	}
+	restarted := auth.New(app.repo, "old configured password", 90)
+	if err := restarted.Initialize(context.Background(), "old configured password"); err != nil || !restarted.ComparePassword("a sufficiently long password") {
+		t.Fatalf("persisted password was not loaded: %v", err)
 	}
 }
 

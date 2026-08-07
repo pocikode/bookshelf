@@ -62,11 +62,6 @@ func serve() error {
 	}
 	logger := newLogger(cfg.LogLevel)
 	slog.SetDefault(logger)
-	if cfg.UsingDefaultPassword() {
-		logger.Warn("default_password_in_use",
-			"event", "default_password_in_use",
-			"advice", "APP_PASSWORD was not set; the built-in default password is in use, set APP_PASSWORD before exposing this service")
-	}
 	startupCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	db, err := database.Open(startupCtx, cfg.DataDir)
@@ -84,6 +79,15 @@ func serve() error {
 		return fmt.Errorf("reconcile deletion trash: %w", err)
 	}
 	authService := auth.New(repo, cfg.Password, cfg.SessionDays)
+	if err = authService.Initialize(startupCtx, cfg.Password); err != nil {
+		db.Close()
+		return fmt.Errorf("initialize password credential: %w", err)
+	}
+	if cfg.UsingDefaultPassword() && authService.ComparePassword(config.DefaultPassword) {
+		logger.Warn("default_password_in_use",
+			"event", "default_password_in_use",
+			"advice", "APP_PASSWORD was not set; the built-in default password is in use, set APP_PASSWORD before exposing this service")
+	}
 	handler, err := web.NewServer(web.Dependencies{Config: cfg, Repository: repo, Auth: authService, Limiter: ratelimit.New(nil), Library: libraryService, Progress: progress.New(repo), Logger: logger})
 	if err != nil {
 		db.Close()

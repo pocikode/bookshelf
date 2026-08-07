@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,8 +13,9 @@ import (
 )
 
 type memoryRepo struct {
-	sessions map[string]database.Session
-	touches  int
+	sessions   map[string]database.Session
+	credential database.PasswordCredential
+	touches    int
 }
 
 func TestCookieFlags(t *testing.T) {
@@ -53,6 +56,16 @@ func (m *memoryRepo) DeleteSession(_ context.Context, h string) error {
 }
 func (m *memoryRepo) DeleteAllSessions(context.Context) error {
 	m.sessions = map[string]database.Session{}
+	return nil
+}
+func (m *memoryRepo) GetPasswordCredential(context.Context) (database.PasswordCredential, error) {
+	if m.credential.Digest == "" {
+		return database.PasswordCredential{}, sql.ErrNoRows
+	}
+	return m.credential, nil
+}
+func (m *memoryRepo) SetPasswordCredential(_ context.Context, credential database.PasswordCredential) error {
+	m.credential = credential
 	return nil
 }
 
@@ -99,6 +112,39 @@ func TestSessionBindingExpiryTouchAndCSRF(t *testing.T) {
 	changed.now = svc.now
 	if _, err = changed.Resolve(context.Background(), sess.Token); err == nil {
 		t.Fatal("password change did not revoke")
+	}
+}
+
+func TestChangePasswordPersistsAndRevokesSessions(t *testing.T) {
+	repo := &memoryRepo{sessions: map[string]database.Session{}}
+	svc := New(repo, "correct horse battery", 1)
+	svc.now = func() time.Time { return time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) }
+	session, err := svc.Create(context.Background(), "browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.ChangePassword(context.Background(), "wrong", "a sufficiently long password"); !errors.Is(err, ErrInvalidCurrentPassword) {
+		t.Fatalf("wrong current password error=%v", err)
+	}
+	if err := svc.ChangePassword(context.Background(), "correct horse battery", "short"); !errors.Is(err, ErrPasswordTooShort) {
+		t.Fatalf("short password error=%v", err)
+	}
+	if err := svc.ChangePassword(context.Background(), "correct horse battery", "a sufficiently long password"); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.ComparePassword("a sufficiently long password") || svc.ComparePassword("correct horse battery") {
+		t.Fatal("password was not changed")
+	}
+	if _, err := svc.Resolve(context.Background(), session.Token); err == nil {
+		t.Fatal("existing session survived password change")
+	}
+
+	restarted := New(repo, "old configured password", 1)
+	if err := restarted.Initialize(context.Background(), "old configured password"); err != nil {
+		t.Fatal(err)
+	}
+	if !restarted.ComparePassword("a sufficiently long password") {
+		t.Fatal("persisted password was not loaded")
 	}
 }
 

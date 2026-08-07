@@ -13,6 +13,22 @@ type Repository struct{ DB *sql.DB }
 
 func NewRepository(db *sql.DB) *Repository { return &Repository{DB: db} }
 
+func (r *Repository) GetPasswordCredential(ctx context.Context) (PasswordCredential, error) {
+	var credential PasswordCredential
+	var updated string
+	err := r.DB.QueryRowContext(ctx, `SELECT password_digest,updated_at FROM password_credentials WHERE id=1`).Scan(&credential.Digest, &updated)
+	if err != nil {
+		return credential, err
+	}
+	credential.UpdatedAt, err = parseStamp(updated)
+	return credential, err
+}
+
+func (r *Repository) SetPasswordCredential(ctx context.Context, credential PasswordCredential) error {
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO password_credentials(id,password_digest,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET password_digest=excluded.password_digest,updated_at=excluded.updated_at`, credential.Digest, stamp(credential.UpdatedAt))
+	return err
+}
+
 func (r *Repository) CreateSession(ctx context.Context, s Session) error {
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO sessions(token_hash,password_binding,created_at,last_seen_at,expires_at,user_agent) VALUES(?,?,?,?,?,?)`, s.TokenHash, s.PasswordBinding, stamp(s.CreatedAt), stamp(s.LastSeenAt), stamp(s.ExpiresAt), s.UserAgent)
 	return err

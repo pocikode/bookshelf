@@ -10,6 +10,7 @@ check:
 	test -s internal/web/dist/reader.js
 	test -s internal/web/dist/upload.js
 	test -s internal/web/dist/pdf.worker.js
+	test -s internal/web/dist/favicon.svg
 
 test: assets check
 	go test -race -cover ./...

@@ -28,7 +28,7 @@ The published container is multi-architecture (`linux/amd64` and `linux/arm64`),
 
 All durable state—SQLite, books, covers, and recovery metadata—is under the data directory (`/app/data` in the container). Back up the complete volume while the service is stopped, or use SQLite's online backup tooling and copy the file directories consistently. Restore by mounting the copied directory at `/app/data` and starting the same or a newer image. Never restore only `bookshelf.db` without its `books/` and `covers/` directories.
 
-Changing `APP_PASSWORD` invalidates every existing session. The Settings page can also revoke the current session or all sessions.
+The first startup seeds the password from `APP_PASSWORD`; afterward the Settings page can change it. Changing the password invalidates every existing session and survives restarts. The Settings page can also revoke the current session or all sessions.
 
 ## Development
 

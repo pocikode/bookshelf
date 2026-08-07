@@ -13,9 +13,10 @@ async function run(args: string[]) {
 
 await run(["bunx", "@tailwindcss/cli", "-i", "assets/css/app.css", "-o", `${dist}/app.css`, "--minify"]);
 await run(["bun", "build", "assets/js/reader.js", "assets/js/upload.js", "--outdir", dist, "--target", "browser", "--minify"]);
+await copyFile("assets/favicon.svg", `${dist}/favicon.svg`);
 // pdf.worker.mjs is already a standalone browser ESM. Re-bundling it with
 // Bun produces a worker that loads but never completes pdf.js's handshake.
 await copyFile("node_modules/pdfjs-dist/build/pdf.worker.mjs", `${dist}/pdf.worker.js`);
 
-for (const output of ["app.css", "reader.js", "upload.js", "pdf.worker.js"]) await stat(`${dist}/${output}`);
+for (const output of ["app.css", "reader.js", "upload.js", "pdf.worker.js", "favicon.svg"]) await stat(`${dist}/${output}`);
 if ((await stat(`${dist}/app.css`)).size < 3000) throw new Error("generated app.css is unexpectedly small");

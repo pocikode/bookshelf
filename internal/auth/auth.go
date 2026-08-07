@@ -11,7 +11,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"pocikode/bookshelf/internal/database"
 )
@@ -19,18 +21,25 @@ import (
 const CookieName = "bookshelf_session"
 
 var ErrInvalidSession = errors.New("invalid session")
+var ErrInvalidCurrentPassword = errors.New("invalid current password")
+var ErrPasswordTooShort = errors.New("password is too short")
 
-type sessionRepository interface {
+const MinPasswordLength = 12
+
+type repository interface {
 	CreateSession(context.Context, database.Session) error
 	FindSession(context.Context, string) (database.Session, error)
 	TouchSession(context.Context, string, time.Time) error
 	DeleteSession(context.Context, string) error
 	DeleteAllSessions(context.Context) error
+	GetPasswordCredential(context.Context) (database.PasswordCredential, error)
+	SetPasswordCredential(context.Context, database.PasswordCredential) error
 }
 
 type Service struct {
-	repo       sessionRepository
+	repo       repository
 	password   [sha256.Size]byte
+	passwordMu sync.RWMutex
 	random     io.Reader
 	now        func() time.Time
 	sessionTTL time.Duration
@@ -43,13 +52,55 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
-func New(repo sessionRepository, password string, sessionDays int) *Service {
+func New(repo repository, password string, sessionDays int) *Service {
 	return &Service{repo: repo, password: sha256.Sum256([]byte(password)), random: rand.Reader, now: time.Now, sessionTTL: time.Duration(sessionDays) * 24 * time.Hour}
+}
+
+func (s *Service) Initialize(ctx context.Context, fallback string) error {
+	credential, err := s.repo.GetPasswordCredential(ctx)
+	if database.IsNotFound(err) {
+		digest := sha256.Sum256([]byte(fallback))
+		credential = database.PasswordCredential{Digest: hex.EncodeToString(digest[:]), UpdatedAt: s.now().UTC()}
+		if err := s.repo.SetPasswordCredential(ctx, credential); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	digest, err := hex.DecodeString(credential.Digest)
+	if err != nil || len(digest) != sha256.Size {
+		return errors.New("invalid stored password credential")
+	}
+	s.passwordMu.Lock()
+	copy(s.password[:], digest)
+	s.passwordMu.Unlock()
+	return nil
 }
 
 func (s *Service) ComparePassword(submitted string) bool {
 	digest := sha256.Sum256([]byte(submitted))
+	s.passwordMu.RLock()
+	defer s.passwordMu.RUnlock()
 	return subtle.ConstantTimeCompare(digest[:], s.password[:]) == 1
+}
+
+func (s *Service) ChangePassword(ctx context.Context, current, next string) error {
+	if utf8.RuneCountInString(next) < MinPasswordLength {
+		return ErrPasswordTooShort
+	}
+	digest := sha256.Sum256([]byte(next))
+	currentDigest := sha256.Sum256([]byte(current))
+	s.passwordMu.Lock()
+	defer s.passwordMu.Unlock()
+	if subtle.ConstantTimeCompare(currentDigest[:], s.password[:]) != 1 {
+		return ErrInvalidCurrentPassword
+	}
+	credential := database.PasswordCredential{Digest: hex.EncodeToString(digest[:]), UpdatedAt: s.now().UTC()}
+	if err := s.repo.SetPasswordCredential(ctx, credential); err != nil {
+		return err
+	}
+	s.password = digest
+	return s.repo.DeleteAllSessions(ctx)
 }
 
 func (s *Service) Create(ctx context.Context, userAgent string) (Session, error) {
@@ -128,6 +179,8 @@ func csrfDigest(raw []byte) [sha256.Size]byte {
 }
 
 func (s *Service) binding(raw []byte) []byte {
+	s.passwordMu.RLock()
+	defer s.passwordMu.RUnlock()
 	h := hmac.New(sha256.New, s.password[:])
 	_, _ = h.Write(raw)
 	return h.Sum(nil)

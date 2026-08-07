@@ -2,6 +2,7 @@ import { copyFile, mkdir } from "node:fs/promises";
 
 await mkdir("internal/web/dist", { recursive: true });
 await copyFile("node_modules/pdfjs-dist/build/pdf.worker.mjs", "internal/web/dist/pdf.worker.js");
+await copyFile("assets/favicon.svg", "internal/web/dist/favicon.svg");
 
 const commands = [
   ["bunx", "@tailwindcss/cli", "-i", "assets/css/app.css", "-o", "internal/web/dist/app.css", "--watch"],
