@@ -68,7 +68,8 @@ async function bootPDF(saved) {
 
 async function renderPDFPage() {
   const page = await state.pdf.getPage(state.pdfPage);
-  const viewport = page.getViewport({ scale: state.pdfZoom * devicePixelRatio });
+  const zoom = isFullscreen() ? window.innerHeight / page.getViewport({ scale: 1 }).height : state.pdfZoom;
+  const viewport = page.getViewport({ scale: zoom * devicePixelRatio });
   const canvas = document.querySelector("#pdf-canvas");
   const ctx = canvas.getContext("2d", { alpha: false });
   canvas.width = viewport.width; canvas.height = viewport.height;
@@ -109,11 +110,59 @@ function installControls() {
   document.querySelector("#pdf-tone").addEventListener("click", () => { const current = app.dataset.pdfTone || "paper"; const next = pdfTones[(pdfTones.indexOf(current) + 1) % pdfTones.length]; setPDFTone(next); });
   document.querySelector("#increase").addEventListener("click", () => adjust(1));
   document.querySelector("#decrease").addEventListener("click", () => adjust(-1));
+  installFullscreenControl();
   document.addEventListener("keydown", async event => { if (["INPUT","SELECT","TEXTAREA"].includes(event.target.tagName)) return; if (["ArrowRight","PageDown"].includes(event.key)) await navigate(1); if (["ArrowLeft","PageUp"].includes(event.key)) await navigate(-1); });
   let touch = null; document.querySelector("#reader-stage").addEventListener("touchstart", e => { touch = { x: e.touches[0].clientX, y: e.touches[0].clientY }; }, { passive: true }); document.querySelector("#reader-stage").addEventListener("touchend", e => { if (!touch) return; const dx = e.changedTouches[0].clientX - touch.x; const dy = e.changedTouches[0].clientY - touch.y; touch = null; if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) navigate(dx < 0 ? 1 : -1); }, { passive: true });
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") save(true); });
   addEventListener("pagehide", () => save(true));
 }
+
+function installFullscreenControl() {
+  const controls = document.querySelector(".reader-controls");
+  if (!controls || (!app.requestFullscreen && !app.webkitRequestFullscreen)) return;
+  const button = document.createElement("button");
+  button.className = "reader-control reader-fullscreen-control";
+  button.id = "fullscreen";
+  button.type = "button";
+  button.textContent = "⛶";
+  button.setAttribute("aria-label", "Enter fullscreen");
+  button.title = "Enter fullscreen";
+  button.addEventListener("click", toggleFullscreen);
+  controls.append(button);
+  document.addEventListener("fullscreenchange", updateFullscreenControl);
+  document.addEventListener("webkitfullscreenchange", updateFullscreenControl);
+  document.addEventListener("fullscreenchange", rerenderPDF);
+  document.addEventListener("webkitfullscreenchange", rerenderPDF);
+  addEventListener("resize", rerenderFullscreenPDF);
+  updateFullscreenControl();
+}
+
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement || document.webkitFullscreenElement) {
+      if (document.exitFullscreen) await document.exitFullscreen();
+      else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+      return;
+    }
+    if (app.requestFullscreen) await app.requestFullscreen();
+    else if (app.webkitRequestFullscreen) app.webkitRequestFullscreen();
+  } catch (error) {
+    console.warn("Could not change fullscreen state", error);
+  }
+}
+
+function updateFullscreenControl() {
+  const button = document.querySelector("#fullscreen");
+  if (!button) return;
+  const active = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  const label = active ? "Exit fullscreen" : "Enter fullscreen";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+}
+
+function isFullscreen() { return Boolean(document.fullscreenElement || document.webkitFullscreenElement); }
+function rerenderPDF() { if (format === "pdf" && state.pdf) renderPDFPage().catch(error => console.warn("Could not resize PDF", error)); }
+function rerenderFullscreenPDF() { if (format === "pdf" && state.pdf && isFullscreen()) renderPDFPage().catch(error => console.warn("Could not resize PDF for fullscreen", error)); }
 
 async function navigate(direction) { if (format === "epub") return direction > 0 ? state.rendition.next() : state.rendition.prev(); const next = Math.min(Math.max(state.pdfPage + direction, 1), state.pdf.numPages); if (next !== state.pdfPage) { state.pdfPage = next; await renderPDFPage(); observe({ page: next }); } }
 async function adjust(direction) { if (format === "epub") { const value = boundedNumber(localStorage.getItem("bookshelf:v1:epub-font"), 100, 75, 180) + direction * 10; localStorage.setItem("bookshelf:v1:epub-font", value); state.rendition.themes.fontSize(`${value}%`); } else { state.pdfZoom = Math.min(Math.max(state.pdfZoom + direction * .15, .5), 3); localStorage.setItem("bookshelf:v1:pdf-zoom", state.pdfZoom); await renderPDFPage(); } }
