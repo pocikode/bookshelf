@@ -33,7 +33,7 @@ async function bootEPUB(saved) {
   const font = boundedNumber(localStorage.getItem("bookshelf:v1:epub-font"), 100, 75, 180);
   rendition.themes.fontSize(`${font}%`);
   const dark = document.documentElement.classList.contains("dark");
-  rendition.themes.default({ body: { color: dark ? "#f5f5f4" : "#1c1917", background: dark ? "#0c0a09" : "#fafaf9" } });
+  rendition.themes.default({ html: { height: "100%" }, body: { "box-sizing": "border-box", color: dark ? "#f5f5f4" : "#1c1917", background: dark ? "#0c0a09" : "#fafaf9", "min-height": "100%", display: "flex", "flex-direction": "column", "justify-content": "center" } });
   await rendition.display(saved.position || undefined);
   rendition.on("relocated", location => observe({ position: location.start.cfi, percent: percentFor(location.start.cfi) }));
   const navigation = await book.loaded.navigation;
@@ -68,8 +68,7 @@ async function bootPDF(saved) {
 
 async function renderPDFPage() {
   const page = await state.pdf.getPage(state.pdfPage);
-  const zoom = isFullscreen() ? window.innerHeight / page.getViewport({ scale: 1 }).height : state.pdfZoom;
-  const viewport = page.getViewport({ scale: zoom * devicePixelRatio });
+  const viewport = page.getViewport({ scale: state.pdfZoom * devicePixelRatio });
   const canvas = document.querySelector("#pdf-canvas");
   const ctx = canvas.getContext("2d", { alpha: false });
   canvas.width = viewport.width; canvas.height = viewport.height;
@@ -106,7 +105,7 @@ async function save(beacon = false) {
 
 function installControls() {
   document.querySelector("#toc-toggle").addEventListener("click", event => { const toc = document.querySelector("#toc"); toc.hidden = !toc.hidden; event.currentTarget.setAttribute("aria-expanded", String(!toc.hidden)); });
-  document.querySelector("#theme").addEventListener("click", () => { const dark = document.documentElement.classList.toggle("dark"); localStorage.setItem("bookshelf:v1:theme", dark ? "dark" : "light"); if (state.rendition) state.rendition.themes.default({ body: { color: dark ? "#f5f5f4" : "#1c1917", background: dark ? "#0c0a09" : "#fafaf9" } }); });
+  document.querySelector("#theme").addEventListener("click", () => { const dark = document.documentElement.classList.toggle("dark"); localStorage.setItem("bookshelf:v1:theme", dark ? "dark" : "light"); if (state.rendition) state.rendition.themes.default({ html: { height: "100%" }, body: { "box-sizing": "border-box", color: dark ? "#f5f5f4" : "#1c1917", background: dark ? "#0c0a09" : "#fafaf9", "min-height": "100%", display: "flex", "flex-direction": "column", "justify-content": "center" } }); });
   document.querySelector("#pdf-tone").addEventListener("click", () => { const current = app.dataset.pdfTone || "paper"; const next = pdfTones[(pdfTones.indexOf(current) + 1) % pdfTones.length]; setPDFTone(next); });
   document.querySelector("#increase").addEventListener("click", () => adjust(1));
   document.querySelector("#decrease").addEventListener("click", () => adjust(-1));
