@@ -70,9 +70,10 @@
           <div class="upload-dialog-section">
             <label id="upload-dropzone" class="upload-dropzone" for="books">
               <span class="dropzone-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 16V4m0 0L8 8m4-4 4 4M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14"/></svg></span>
-              <strong>Drop files here or choose from your device</strong>
-              <span>Up to 20 books at a time</span>
+              <strong id="upload-dropzone-title">Drop files here or choose from your device</strong>
+              <span id="upload-dropzone-hint">Up to 20 books at a time</span>
               <span class="format-list" aria-label="Supported formats"><span class="format-chip">EPUB</span><span class="format-chip">PDF</span></span>
+              <ul id="upload-file-list" class="upload-file-list" aria-label="Selected books" hidden></ul>
             </label>
             <input class="sr-only" id="books" name="books" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" multiple required>
             <p id="upload-file-summary" class="upload-file-summary mt-3" aria-live="polite">No books selected yet</p>

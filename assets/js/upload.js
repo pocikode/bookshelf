@@ -1,10 +1,18 @@
 import * as pdfjsLib from "pdfjs-dist";
 
 const form = document.querySelector("#upload-form");
+let dropzone;
+let dropzoneTitle;
+let dropzoneHint;
+let fileList;
+let summary;
 if (form) {
   const input = form.querySelector("#books");
-  const dropzone = form.querySelector("#upload-dropzone");
-  const summary = form.querySelector("#upload-file-summary");
+  dropzone = form.querySelector("#upload-dropzone");
+  dropzoneTitle = form.querySelector("#upload-dropzone-title");
+  dropzoneHint = form.querySelector("#upload-dropzone-hint");
+  fileList = form.querySelector("#upload-file-list");
+  summary = form.querySelector("#upload-file-summary");
   const dialog = document.querySelector("#upload-dialog");
   pdfjsLib.GlobalWorkerOptions.workerSrc = form.dataset.workerUrl;
   input.addEventListener("change", updateFileSummary);
@@ -55,7 +63,7 @@ async function submit(event) {
 
 function setFiles(files) {
   const transfer = new DataTransfer();
-  for (const file of files.filter(isSupported).slice(0, 20)) transfer.items.add(file);
+  for (const file of files.slice(0, 20)) transfer.items.add(file);
   form.querySelector("#books").files = transfer.files;
   updateFileSummary();
 }
@@ -63,7 +71,38 @@ function setFiles(files) {
 function updateFileSummary() {
   const files = [...form.querySelector("#books").files];
   const invalid = files.some(file => !isSupported(file));
-  summary.textContent = invalid ? "EPUB or PDF files only" : files.length ? `${files.length} book${files.length === 1 ? "" : "s"} selected` : "No books selected yet";
+  const hasFiles = files.length > 0 && !invalid;
+  const count = files.length;
+  const label = `${count} book${count === 1 ? "" : "s"}`;
+
+  summary.textContent = invalid ? "Unsupported file type" : hasFiles ? `${label} selected` : "No books selected yet";
+  summary.classList.toggle("has-files", hasFiles);
+  summary.classList.toggle("has-error", invalid);
+  dropzone.classList.toggle("has-files", hasFiles);
+  dropzone.classList.toggle("has-error", invalid);
+  dropzoneTitle.textContent = invalid ? "Unsupported file type" : hasFiles ? `${label} ready to upload` : "Drop files here or choose from your device";
+  dropzoneHint.textContent = invalid ? "Choose EPUB or PDF files only" : hasFiles ? count === 20 ? "20-book limit reached" : "Drop more files or choose again to replace" : "Up to 20 books at a time";
+  renderFileList(files);
+}
+
+function renderFileList(files) {
+  fileList.replaceChildren();
+  fileList.hidden = files.length === 0;
+  for (const file of files) {
+    const item = document.createElement("li");
+    const name = document.createElement("span");
+    const size = document.createElement("small");
+    name.textContent = file.name;
+    size.textContent = formatFileSize(file.size);
+    item.className = isSupported(file) ? "" : "is-invalid";
+    item.append(name, size);
+    fileList.append(item);
+  }
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function isSupported(file) { return /\.(epub|pdf)$/i.test(file.name); }
