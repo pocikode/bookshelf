@@ -8,6 +8,12 @@ Bookshelf is a single-user, self-hosted EPUB/PDF library. Reading position is st
 docker compose up -d
 ```
 
+To update an existing deployment to the latest published image:
+
+```sh
+./scripts/deploy.sh
+```
+
 No configuration is required. Every variable has a default, and without `APP_PASSWORD` the login password is `123456`. Startup logs a warning while that default is in use:
 
 ```sh

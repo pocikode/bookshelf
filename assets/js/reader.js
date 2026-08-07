@@ -13,9 +13,11 @@ const pdfTones = ["paper", "sepia", "light"];
 if (app) boot().catch(fail);
 
 async function boot() {
+  setLoading("Restoring your place…");
   const response = await fetch(endpoint, { credentials: "same-origin" });
   if (!response.ok) throw new Error("Could not restore reading position");
   const saved = await response.json();
+  setLoading("Preparing the first page…");
   if (format === "epub") await bootEPUB(saved);
   else await bootPDF(saved);
   installControls();
@@ -119,6 +121,7 @@ function renderTOC(items, activate) { const list = document.querySelector("#toc-
 function percentFor(cfi) { if (!state.locations) return undefined; const value = state.locations.percentageFromCfi(cfi); return Number.isFinite(value) ? value : undefined; }
 function boundedNumber(raw, fallback, min, max) { const value = Number(raw); return Number.isFinite(value) && value >= min && value <= max ? value : fallback; }
 function setPhase(phase) { state.phase = phase; sync.textContent = phase[0].toUpperCase() + phase.slice(1); sync.dataset.state = phase; }
+function setLoading(message) { const loading = document.querySelector("#reader-loading-text"); if (loading) loading.textContent = message; }
 function setPDFTone(tone) { const value = pdfTones.includes(tone) ? tone : "paper"; app.dataset.pdfTone = value; localStorage.setItem("bookshelf:v1:pdf-tone", value); const button = document.querySelector("#pdf-tone"); if (button) { const label = value[0].toUpperCase() + value.slice(1); button.textContent = label; button.setAttribute("aria-label", `PDF page background: ${label}. Activate to change`); button.title = `PDF page background: ${label}`; } }
-function fail(error) { console.error(error); app?.classList.remove("is-loading"); setPhase("failed"); const loading = document.querySelector("#reader-loading"); if (loading) loading.textContent = "This book could not be opened."; }
+function fail(error) { console.error(error); app?.classList.remove("is-loading"); setPhase("failed"); setLoading("This book could not be opened."); }
 function deviceLabel() { const ua = navigator.userAgent; const brands = navigator.userAgentData?.brands?.map(item => item.brand).join(" ") || ""; const platform = navigator.userAgentData?.platform || ""; const browser = /Edge|Microsoft Edge/i.test(brands) || /Edg\//.test(ua) ? "Edge" : /Firefox/i.test(brands) || /Firefox\//.test(ua) ? "Firefox" : /Chrom/i.test(brands) || /CriOS|Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Other"; const source = `${platform} ${ua}`; const os = /Android/i.test(source) ? "Android" : /iOS|iPad|iPhone|iPod/i.test(source) ? "iOS/iPadOS" : /macOS|Mac OS X/i.test(source) ? "macOS" : /Windows/i.test(source) ? "Windows" : /Linux/i.test(source) ? "Linux" : "Other"; return `${browser} on ${os}`.slice(0, 100); }
