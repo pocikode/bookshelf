@@ -55,7 +55,7 @@ async function boot() {
 async function bootEPUB(saved) {
   const viewer = document.querySelector("#epub-viewer");
   viewer.hidden = false;
-  const book = ePub(app.dataset.fileUrl, { requestCredentials: true });
+  const book = ePub(app.dataset.fileUrl, { requestCredentials: true, openAs: "epub" });
   const rendition = book.renderTo("epub-viewer", { width: "100%", height: "100%", spread: "auto" });
   state.book = book;
   state.rendition = rendition;
