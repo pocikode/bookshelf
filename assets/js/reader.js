@@ -21,6 +21,7 @@ const state = {
   book: null,
   rendition: null,
   pdf: null,
+  pdfTextLayer: null,
   pdfPage: 1,
   pdfRenderToken: 0,
   locations: null,
@@ -125,16 +126,32 @@ async function bootPDF(saved) {
 async function renderPDFPage() {
   const page = await state.pdf.getPage(state.pdfPage);
   const token = ++state.pdfRenderToken;
+  state.pdfTextLayer?.cancel();
+  state.pdfTextLayer = null;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const viewport = page.getViewport({ scale: state.preferences.pdfZoom * dpr });
   const canvas = document.querySelector("#pdf-canvas");
+  const textLayerContainer = document.querySelector("#pdf-text-layer");
   const context = canvas.getContext("2d", { alpha: false });
+  textLayerContainer.replaceChildren();
   canvas.width = viewport.width;
   canvas.height = viewport.height;
   canvas.style.width = `${viewport.width / dpr}px`;
   await page.render({ canvasContext: context, viewport }).promise;
   if (token !== state.pdfRenderToken) return;
   canvas.hidden = false;
+  const baseViewport = page.getViewport({ scale: 1 });
+  const displayedWidth = canvas.getBoundingClientRect().width || viewport.width / dpr;
+  const textScale = displayedWidth / baseViewport.width;
+  textLayerContainer.style.setProperty("--total-scale-factor", String(textScale));
+  const textLayer = new pdfjsLib.TextLayer({
+    textContentSource: await page.getTextContent(),
+    container: textLayerContainer,
+    viewport: page.getViewport({ scale: textScale }),
+  });
+  state.pdfTextLayer = textLayer;
+  await textLayer.render();
+  if (token !== state.pdfRenderToken) return;
   updatePDFProgress();
 }
 
@@ -195,11 +212,26 @@ function attachEPUBContents(contents) {
   const contentDocument = contents?.document;
   if (!contentDocument || state.boundDocuments.has(contentDocument)) return;
   state.boundDocuments.add(contentDocument);
+  enableEPUBTextSelection(contentDocument);
   contentDocument.addEventListener("keydown", handleKeydown);
   contentDocument.addEventListener("click", event => {
+    const selection = contentDocument.getSelection?.();
+    if (selection && !selection.isCollapsed) return;
     if (!event.target.closest("a")) toggleChrome();
   });
   bindTouchSurface(contentDocument);
+}
+
+function enableEPUBTextSelection(contentDocument) {
+  const style = contentDocument.createElement("style");
+  style.textContent = `
+    html, body, body * {
+      -webkit-touch-callout: default !important;
+      -webkit-user-select: text !important;
+      user-select: text !important;
+    }
+  `;
+  contentDocument.head.append(style);
 }
 
 function bindTouchSurface(target) {
@@ -213,6 +245,8 @@ function bindTouchSurface(target) {
     const dx = event.changedTouches[0].clientX - touch.x;
     const dy = event.changedTouches[0].clientY - touch.y;
     touch = null;
+    const selection = target.getSelection?.() || target.ownerDocument?.getSelection?.();
+    if (selection && !selection.isCollapsed) return;
     if (Math.abs(dx) > 52 && Math.abs(dx) > Math.abs(dy) * 1.35) navigate(dx < 0 ? 1 : -1);
     else if (Math.abs(dx) < 16 && Math.abs(dy) < 16) setChromeVisible(!app.classList.contains("reader-chrome-hidden"));
   }, { passive: true });

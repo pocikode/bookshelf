@@ -228,11 +228,16 @@
   #reader-app[data-format="pdf"][data-pdf-tone="sepia"] #pdf-page { background: #e9dec8; }
   #reader-app[data-format="pdf"][data-pdf-tone="light"] #pdf-page { background: #ffffff; }
   #pdf-page { display: flex; width: fit-content; max-width: 100%; min-height: 100%; flex: 0 0 auto; flex-direction: column; justify-content: center; margin-inline: auto; }
+  #pdf-sheet { position: relative; width: fit-content; max-width: 100%; margin-inline: auto; }
   #pdf-canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  .pdf-text-layer { position: absolute; inset: 0; overflow: hidden; line-height: 1; user-select: text; }
+  .pdf-text-layer :is(span, br) { position: absolute; color: transparent; cursor: text; white-space: pre; transform-origin: 0 0; }
+  .pdf-text-layer ::selection { background: color-mix(in srgb, AccentColor, transparent 75%); }
   #reader-app[data-pdf-tone="paper"] #pdf-canvas, #reader-app[data-pdf-tone="sepia"] #pdf-canvas { mix-blend-mode: multiply; }
   .reader-tap-zone { position: absolute; top: 4.3rem; bottom: 5.6rem; z-index: 10; display: none; width: 18%; border: 0; background: transparent; }
   .reader-prev-zone { left: 0; }
   .reader-next-zone { right: 0; }
+  #reader-app .reader-tap-zone { display: none; }
   .reader-backdrop { position: fixed; z-index: 35; inset: 0; background: rgba(36, 35, 33, .2); backdrop-filter: blur(2px); }
   .reader-panel { position: fixed; z-index: 40; top: 0; bottom: 0; left: 0; width: min(26rem, 88vw); overflow: auto; border-right: 1px solid var(--line); background: var(--surface); padding: max(1.25rem, env(safe-area-inset-top)) 1.35rem max(1.25rem, env(safe-area-inset-bottom)); box-shadow: 12px 0 40px rgba(36, 35, 33, .08); }
   .reader-settings { left: auto; right: 0; border-right: 0; border-left: 1px solid var(--line); box-shadow: -12px 0 40px rgba(36, 35, 33, .08); }
