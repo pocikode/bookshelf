@@ -1,1 +1,130 @@
-{{define "reader"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="csrf-token" content="{{.CSRF}}"><meta name="color-scheme" content="light dark"><script>{{.ThemeScript}}</script><title>{{.Book.Title}} · Bookshelf</title><link rel="icon" href="{{asset "favicon.svg"}}" type="image/svg+xml"><link rel="stylesheet" href="{{asset "app.css"}}"><script type="module" src="{{asset "reader.js"}}" defer></script></head><body class="reader-page"><main id="reader-app" class="reader-app is-loading" data-book-id="{{.Book.ID}}" data-format="{{.Book.Format}}" data-file-hash="{{.Book.FileHash}}" data-page-count="{{.Book.PageCount}}" data-file-url="/api/books/{{.Book.ID}}/file" data-worker-url="{{asset "pdf.worker.js"}}"><header class="reader-toolbar"><a class="reader-control" href="/" aria-label="Back to library"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 12H5m6-6-6 6 6 6"/></svg><span class="reader-control-label">Library</span></a><button class="reader-control reader-contents" id="toc-toggle" type="button" aria-expanded="false">Contents</button><div class="reader-title"><h1>{{.Book.Title}}</h1><p id="reader-progress">Restoring position…</p></div><div class="reader-controls"><button class="reader-control reader-paper-control" id="pdf-tone" type="button" aria-label="Change PDF page background" title="Change PDF page background">Paper</button><button class="reader-control" id="decrease" type="button" aria-label="Decrease font size or zoom">−</button><button class="reader-control" id="increase" type="button" aria-label="Increase font size or zoom">+</button><button class="reader-control" id="theme" type="button" aria-label="Toggle theme">◐</button></div><span id="sync-state" class="sync-state" role="status">Booting</span></header><aside id="toc" class="reader-toc" hidden aria-label="Table of contents"><ol id="toc-list"></ol></aside><section id="reader-stage" class="reader-stage" aria-label="Book content"><div id="epub-viewer"></div><div id="pdf-page"><canvas id="pdf-canvas" hidden></canvas></div><div id="reader-loading" role="status" aria-live="polite"><span class="reader-loading-mark" aria-hidden="true"></span><span id="reader-loading-text">Opening your book…</span></div></section></main></body></html>{{end}}
+{{define "reader"}}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="csrf-token" content="{{.CSRF}}">
+  <meta name="color-scheme" content="light dark">
+  <script>{{.ThemeScript}}</script>
+  <title>{{.Book.Title}} · Bookshelf</title>
+  <link rel="icon" href="{{asset "favicon.svg"}}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{asset "app.css"}}">
+  <script type="module" src="{{asset "reader.js"}}" defer></script>
+</head>
+<body class="reader-page">
+  <main id="reader-app" class="reader-app is-loading" data-book-id="{{.Book.ID}}" data-format="{{.Book.Format}}" data-file-hash="{{.Book.FileHash}}" data-page-count="{{.Book.PageCount}}" data-file-url="/api/books/{{.Book.ID}}/file" data-worker-url="{{asset "pdf.worker.js"}}">
+    <header id="reader-header" class="reader-chrome reader-header">
+      <div class="reader-header-start">
+        <button id="toc-toggle" class="reader-icon-button" type="button" aria-expanded="false" aria-controls="toc" aria-label="Open contents" title="Contents">Menu</button>
+        <a class="reader-icon-button reader-library-link" href="/" aria-label="Back to library" title="Back to library">Library</a>
+      </div>
+      <div class="reader-title">
+        <h1>{{.Book.Title}}</h1>
+        <p id="reader-section">Restoring position...</p>
+      </div>
+      <div class="reader-header-actions">
+        <button id="settings-toggle" class="reader-icon-button" type="button" aria-expanded="false" aria-controls="reader-settings" aria-label="Open reading settings" title="Reading settings">Aa</button>
+        <button id="theme" class="reader-icon-button" type="button" aria-label="Toggle theme" title="Toggle theme">Theme</button>
+        <button id="fullscreen" class="reader-icon-button" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">Full</button>
+        <span id="sync-state" class="sync-state" role="status">Booting</span>
+      </div>
+    </header>
+
+    <div id="reader-backdrop" class="reader-backdrop" hidden></div>
+
+    <aside id="toc" class="reader-panel reader-toc" hidden aria-label="Table of contents">
+      <div class="reader-panel-header">
+        <div>
+          <span class="reader-panel-kicker">Navigate</span>
+          <h2>Contents</h2>
+        </div>
+        <button id="toc-close" class="reader-panel-close" type="button" aria-label="Close contents">Close</button>
+      </div>
+      <nav aria-label="Book contents">
+        <ol id="toc-list"></ol>
+      </nav>
+    </aside>
+
+    <aside id="reader-settings" class="reader-panel reader-settings" hidden aria-label="Reading settings">
+      <div class="reader-panel-header">
+        <div>
+          <span class="reader-panel-kicker">Customize</span>
+          <h2>Reading settings</h2>
+        </div>
+        <button id="settings-close" class="reader-panel-close" type="button" aria-label="Close reading settings">Close</button>
+      </div>
+      <div class="reader-settings-group">
+        <div class="reader-setting-row">
+          <label for="font-size">Text size</label>
+          <output id="font-size-value" for="font-size">100%</output>
+        </div>
+        <input id="font-size" type="range" min="75" max="180" step="5" value="100">
+      </div>
+      <div class="reader-settings-group reader-epub-setting">
+        <div class="reader-setting-row">
+          <label for="line-height">Line height</label>
+          <output id="line-height-value" for="line-height">1.5</output>
+        </div>
+        <input id="line-height" type="range" min="1.2" max="2" step="0.1" value="1.5">
+      </div>
+      <div class="reader-settings-group reader-epub-setting">
+        <div class="reader-setting-row">
+          <label for="text-width">Text width</label>
+          <output id="text-width-value" for="text-width">52rem</output>
+        </div>
+        <input id="text-width" type="range" min="32" max="80" step="2" value="52">
+      </div>
+      <div class="reader-settings-group reader-epub-setting">
+        <label for="reader-flow">Reading mode</label>
+        <select id="reader-flow" class="reader-setting-select">
+          <option value="paginated">Paginated</option>
+          <option value="scrolled">Scrolling</option>
+        </select>
+      </div>
+      <div class="reader-settings-group reader-pdf-setting">
+        <div class="reader-setting-row">
+          <label for="pdf-zoom">PDF zoom</label>
+          <output id="pdf-zoom-value" for="pdf-zoom">125%</output>
+        </div>
+        <input id="pdf-zoom" type="range" min="50" max="300" step="5" value="125">
+      </div>
+      <div class="reader-settings-group reader-pdf-setting">
+        <label>PDF page tone</label>
+        <div class="reader-segmented" role="group" aria-label="PDF page tone">
+          <button class="reader-segment" data-pdf-tone="paper" type="button">Paper</button>
+          <button class="reader-segment" data-pdf-tone="sepia" type="button">Sepia</button>
+          <button class="reader-segment" data-pdf-tone="light" type="button">Light</button>
+        </div>
+      </div>
+      <button id="reset-settings" class="reader-reset" type="button">Reset settings</button>
+    </aside>
+
+    <section id="reader-stage" class="reader-stage" aria-label="Book reader">
+      <div id="reader-loading" class="reader-loading" role="status" aria-live="polite">
+        <div class="reader-loading-mark" aria-hidden="true"></div>
+        <p id="reader-loading-text">Restoring your place...</p>
+      </div>
+      <div id="epub-viewer" hidden></div>
+      <div id="pdf-page" hidden>
+        <canvas id="pdf-canvas"></canvas>
+      </div>
+      <button id="reader-prev-zone" class="reader-tap-zone reader-prev-zone" type="button" aria-label="Previous page"></button>
+      <button id="reader-next-zone" class="reader-tap-zone reader-next-zone" type="button" aria-label="Next page"></button>
+    </section>
+
+    <footer id="reader-footer" class="reader-chrome reader-footer">
+      <button id="reader-prev" class="reader-nav-button" type="button" aria-label="Previous page" title="Previous page">Prev</button>
+      <div class="reader-progress-control">
+        <div class="reader-progress-meta">
+          <span id="reader-progress">Preparing...</span>
+          <span id="reader-chapter"></span>
+        </div>
+        <input id="reader-progress-slider" type="range" min="0" max="100" step="0.1" value="0" aria-label="Reading progress">
+      </div>
+      <button id="reader-next" class="reader-nav-button" type="button" aria-label="Next page" title="Next page">Next</button>
+    </footer>
+  </main>
+</body>
+</html>
+{{end}}
