@@ -107,9 +107,15 @@
       </div>
       <div id="epub-viewer" hidden></div>
       <div id="pdf-page" hidden>
-        <div id="pdf-sheet">
-          <canvas id="pdf-canvas"></canvas>
-          <div id="pdf-text-layer" class="pdf-text-layer"></div>
+        <div id="pdf-spread" class="is-single">
+          <div class="pdf-sheet">
+            <canvas id="pdf-canvas"></canvas>
+            <div class="pdf-text-layer"></div>
+          </div>
+          <div class="pdf-sheet" hidden>
+            <canvas id="pdf-canvas-secondary"></canvas>
+            <div class="pdf-text-layer"></div>
+          </div>
         </div>
       </div>
       <button id="reader-prev-zone" class="reader-tap-zone reader-prev-zone" type="button" aria-label="Previous page"></button>

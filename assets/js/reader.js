@@ -21,7 +21,7 @@ const state = {
   book: null,
   rendition: null,
   pdf: null,
-  pdfTextLayer: null,
+  pdfTextLayers: [],
   pdfPage: 1,
   pdfRenderToken: 0,
   locations: null,
@@ -105,7 +105,7 @@ async function bootPDF(saved) {
   setPDFTone(state.preferences.pdfTone, false);
   pdfjsLib.GlobalWorkerOptions.workerSrc = app.dataset.workerUrl;
   state.pdf = await pdfjsLib.getDocument({ url: app.dataset.fileUrl, withCredentials: true }).promise;
-  state.pdfPage = Math.min(Math.max(saved.page || 1, 1), state.pdf.numPages);
+  state.pdfPage = normalizePDFPage(saved.page || 1);
   await renderPDFPage();
   try {
     const outline = await state.pdf.getOutline();
@@ -114,7 +114,7 @@ async function bootPDF(saved) {
       const destination = typeof item.dest === "string" ? await state.pdf.getDestination(item.dest) : item.dest;
       if (!destination) return;
       const pageIndex = await state.pdf.getPageIndex(destination[0]);
-      state.pdfPage = pageIndex + 1;
+      state.pdfPage = normalizePDFPage(pageIndex + 1);
       await renderPDFPage();
       observe({ page: state.pdfPage });
     });
@@ -124,14 +124,29 @@ async function bootPDF(saved) {
 }
 
 async function renderPDFPage() {
-  const page = await state.pdf.getPage(state.pdfPage);
+  const spreadMode = pdfUsesSpread();
+  state.pdfPage = normalizePDFPage(state.pdfPage, spreadMode);
+  const pageNumbers = [state.pdfPage];
+  if (spreadMode && state.pdfPage > 1 && state.pdfPage < state.pdf.numPages) pageNumbers.push(state.pdfPage + 1);
+  const spread = document.querySelector("#pdf-spread");
+  const sheets = [...document.querySelectorAll(".pdf-sheet")];
   const token = ++state.pdfRenderToken;
-  state.pdfTextLayer?.cancel();
-  state.pdfTextLayer = null;
+  for (const textLayer of state.pdfTextLayers) textLayer.cancel();
+  state.pdfTextLayers = [];
+  spread.classList.toggle("is-single", pageNumbers.length === 1);
+  sheets[1].hidden = pageNumbers.length === 1;
+  const pages = await Promise.all(pageNumbers.map(pageNumber => state.pdf.getPage(pageNumber)));
+  if (token !== state.pdfRenderToken) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  await Promise.all(pages.map((page, index) => renderPDFSheet(page, sheets[index], dpr, token)));
+  if (token !== state.pdfRenderToken) return;
+  updatePDFProgress();
+}
+
+async function renderPDFSheet(page, sheet, dpr, token) {
   const viewport = page.getViewport({ scale: state.preferences.pdfZoom * dpr });
-  const canvas = document.querySelector("#pdf-canvas");
-  const textLayerContainer = document.querySelector("#pdf-text-layer");
+  const canvas = sheet.querySelector("canvas");
+  const textLayerContainer = sheet.querySelector(".pdf-text-layer");
   const context = canvas.getContext("2d", { alpha: false });
   textLayerContainer.replaceChildren();
   canvas.width = viewport.width;
@@ -144,15 +159,15 @@ async function renderPDFPage() {
   const displayedWidth = canvas.getBoundingClientRect().width || viewport.width / dpr;
   const textScale = displayedWidth / baseViewport.width;
   textLayerContainer.style.setProperty("--total-scale-factor", String(textScale));
+  const textContent = await page.getTextContent();
+  if (token !== state.pdfRenderToken) return;
   const textLayer = new pdfjsLib.TextLayer({
-    textContentSource: await page.getTextContent(),
+    textContentSource: textContent,
     container: textLayerContainer,
     viewport: page.getViewport({ scale: textScale }),
   });
-  state.pdfTextLayer = textLayer;
+  state.pdfTextLayers.push(textLayer);
   await textLayer.render();
-  if (token !== state.pdfRenderToken) return;
-  updatePDFProgress();
 }
 
 function installControls() {
@@ -184,7 +199,7 @@ function installControls() {
   addEventListener("pagehide", () => save(true));
   addEventListener("resize", () => { if (format === "pdf" && state.pdf) renderPDFPage().catch(error => console.warn("Could not resize PDF", error)); });
   document.querySelector("#reader-stage").addEventListener("click", event => {
-    if (["reader-stage", "pdf-page", "pdf-canvas"].includes(event.target.id)) toggleChrome();
+    if (["reader-stage", "pdf-page", "pdf-spread", "pdf-canvas", "pdf-canvas-secondary"].includes(event.target.id)) toggleChrome();
   });
   bindTouchSurface(document.querySelector("#reader-stage"));
   updateSettingsUI();
@@ -262,11 +277,16 @@ async function navigate(direction) {
     else await state.rendition.prev();
     return;
   }
-  const next = Math.min(Math.max(state.pdfPage + direction, 1), state.pdf.numPages);
-  if (next === state.pdfPage) return;
-  state.pdfPage = next;
+  const next = pdfUsesSpread()
+    ? direction > 0
+      ? state.pdfPage === 1 ? 2 : state.pdfPage + 2
+      : state.pdfPage <= 2 ? 1 : state.pdfPage - 2
+    : state.pdfPage + direction;
+  const normalized = normalizePDFPage(next);
+  if (normalized === state.pdfPage) return;
+  state.pdfPage = normalized;
   await renderPDFPage();
-  observe({ page: next });
+  observe({ page: state.pdfPage });
 }
 
 async function seek(percent) {
@@ -279,7 +299,7 @@ async function seek(percent) {
     if (cfi) await state.rendition.display(cfi);
     return;
   }
-  state.pdfPage = Math.min(Math.max(Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1, 1), state.pdf.numPages);
+  state.pdfPage = normalizePDFPage(Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1);
   await renderPDFPage();
   observe({ page: state.pdfPage });
 }
@@ -290,7 +310,7 @@ async function goToEdge(end) {
     else if (!end) await state.rendition.display();
     return;
   }
-  state.pdfPage = end ? state.pdf.numPages : 1;
+  state.pdfPage = end ? normalizePDFPage(state.pdf.numPages) : 1;
   await renderPDFPage();
   observe({ page: state.pdfPage });
 }
@@ -319,14 +339,34 @@ function updateEPUBProgress(location) {
 function updatePDFProgress() {
   const percent = (state.pdfPage - 1) / Math.max(state.pdf.numPages - 1, 1);
   state.percent = percent;
-  document.querySelector("#reader-progress").textContent = `Page ${state.pdfPage} of ${state.pdf.numPages}`;
+  const lastPage = pdfUsesSpread() && state.pdfPage > 1 ? Math.min(state.pdfPage + 1, state.pdf.numPages) : state.pdfPage;
+  document.querySelector("#reader-progress").textContent = state.pdfPage === lastPage
+    ? `Page ${state.pdfPage} of ${state.pdf.numPages}`
+    : `Pages ${state.pdfPage}-${lastPage} of ${state.pdf.numPages}`;
   document.querySelector("#reader-section").textContent = "PDF";
   document.querySelector("#reader-chapter").textContent = "";
   document.querySelector("#reader-progress-slider").value = String(Math.round(percent * 1000) / 10);
 }
 
 function previewProgress(percent) {
-  document.querySelector("#reader-progress").textContent = format === "pdf" ? `Page ${Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1} of ${state.pdf.numPages}` : `${Math.round(percent * 100)}% read`;
+  if (format !== "pdf") {
+    document.querySelector("#reader-progress").textContent = `${Math.round(percent * 100)}% read`;
+    return;
+  }
+  const page = normalizePDFPage(Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1);
+  const lastPage = pdfUsesSpread() && page > 1 ? Math.min(page + 1, state.pdf.numPages) : page;
+  document.querySelector("#reader-progress").textContent = page === lastPage
+    ? `Page ${page} of ${state.pdf.numPages}`
+    : `Pages ${page}-${lastPage} of ${state.pdf.numPages}`;
+}
+
+function pdfUsesSpread() {
+  return window.matchMedia("(min-width: 701px)").matches;
+}
+
+function normalizePDFPage(page, spread = pdfUsesSpread()) {
+  const value = Math.min(Math.max(Number(page) || 1, 1), state.pdf?.numPages || Number.MAX_SAFE_INTEGER);
+  return !spread || value === 1 ? value : 2 + Math.floor((value - 2) / 2) * 2;
 }
 
 function renderTOC(items, activate) {

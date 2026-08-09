@@ -227,13 +227,15 @@
   #reader-app[data-format="pdf"] #pdf-page { background: #f3efe6; }
   #reader-app[data-format="pdf"][data-pdf-tone="sepia"] #pdf-page { background: #e9dec8; }
   #reader-app[data-format="pdf"][data-pdf-tone="light"] #pdf-page { background: #ffffff; }
-  #pdf-page { display: flex; width: fit-content; max-width: 100%; min-height: 100%; flex: 0 0 auto; flex-direction: column; justify-content: center; margin-inline: auto; }
-  #pdf-sheet { position: relative; width: fit-content; max-width: 100%; margin-inline: auto; }
-  #pdf-canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  #pdf-page { display: flex; width: 100%; max-width: 100%; min-height: 100%; flex: 0 0 auto; flex-direction: column; justify-content: center; margin-inline: auto; }
+  #pdf-spread { display: flex; width: fit-content; max-width: 100%; align-items: center; justify-content: center; margin-inline: auto; }
+  #pdf-spread .pdf-sheet { position: relative; width: fit-content; max-width: 50%; min-width: 0; }
+  #pdf-spread.is-single .pdf-sheet { max-width: 100%; }
+  #pdf-spread canvas { display: block; max-width: 100%; height: auto; margin: 0 auto; }
   .pdf-text-layer { position: absolute; inset: 0; overflow: hidden; line-height: 1; user-select: text; }
   .pdf-text-layer :is(span, br) { position: absolute; color: transparent; cursor: text; white-space: pre; transform-origin: 0 0; }
   .pdf-text-layer ::selection { background: color-mix(in srgb, AccentColor, transparent 75%); }
-  #reader-app[data-pdf-tone="paper"] #pdf-canvas, #reader-app[data-pdf-tone="sepia"] #pdf-canvas { mix-blend-mode: multiply; }
+  #reader-app[data-pdf-tone="paper"] #pdf-spread canvas, #reader-app[data-pdf-tone="sepia"] #pdf-spread canvas { mix-blend-mode: multiply; }
   .reader-tap-zone { position: absolute; top: 4.3rem; bottom: 5.6rem; z-index: 10; display: none; width: 18%; border: 0; background: transparent; }
   .reader-prev-zone { left: 0; }
   .reader-next-zone { right: 0; }
@@ -303,6 +305,9 @@
   .reader-tap-zone { display: block; }
   .reader-footer { gap: .55rem; }
   .reader-nav-button { min-width: 3.25rem; }
+  #pdf-spread { width: 100%; }
+  #pdf-spread .pdf-sheet { max-width: 100%; }
+  #pdf-spread .pdf-sheet:not(:first-child) { display: none; }
 }
 
 @media (max-width: 480px) {
