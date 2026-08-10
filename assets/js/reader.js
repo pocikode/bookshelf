@@ -1,5 +1,6 @@
 import ePub from "epubjs";
 import * as pdfjsLib from "pdfjs-dist";
+import { boundedNumber, deviceLabel as formatDeviceLabel, normalizePDFPage as normalizePage, tocKey } from "./reader-utils.js";
 
 const app = document.querySelector("#reader-app");
 const id = Number(app?.dataset.bookId);
@@ -105,7 +106,7 @@ async function bootPDF(saved) {
   setPDFTone(state.preferences.pdfTone, false);
   pdfjsLib.GlobalWorkerOptions.workerSrc = app.dataset.workerUrl;
   state.pdf = await pdfjsLib.getDocument({ url: app.dataset.fileUrl, withCredentials: true }).promise;
-  state.pdfPage = normalizePDFPage(saved.page || 1);
+  state.pdfPage = normalizePage(saved.page || 1, state.pdf.numPages, pdfUsesSpread());
   await renderPDFPage();
   try {
     const outline = await state.pdf.getOutline();
@@ -114,7 +115,7 @@ async function bootPDF(saved) {
       const destination = typeof item.dest === "string" ? await state.pdf.getDestination(item.dest) : item.dest;
       if (!destination) return;
       const pageIndex = await state.pdf.getPageIndex(destination[0]);
-      state.pdfPage = normalizePDFPage(pageIndex + 1);
+      state.pdfPage = normalizePage(pageIndex + 1, state.pdf.numPages, pdfUsesSpread());
       await renderPDFPage();
       observe({ page: state.pdfPage });
     });
@@ -125,7 +126,7 @@ async function bootPDF(saved) {
 
 async function renderPDFPage() {
   const spreadMode = pdfUsesSpread();
-  state.pdfPage = normalizePDFPage(state.pdfPage, spreadMode);
+  state.pdfPage = normalizePage(state.pdfPage, state.pdf.numPages, spreadMode);
   const pageNumbers = [state.pdfPage];
   if (spreadMode && state.pdfPage > 1 && state.pdfPage < state.pdf.numPages) pageNumbers.push(state.pdfPage + 1);
   const spread = document.querySelector("#pdf-spread");
@@ -286,7 +287,7 @@ async function navigate(direction) {
       ? state.pdfPage === 1 ? 2 : state.pdfPage + 2
       : state.pdfPage <= 2 ? 1 : state.pdfPage - 2
     : state.pdfPage + direction;
-  const normalized = normalizePDFPage(next);
+  const normalized = normalizePage(next, state.pdf.numPages, pdfUsesSpread());
   if (normalized === state.pdfPage) return;
   state.pdfPage = normalized;
   await renderPDFPage();
@@ -303,7 +304,7 @@ async function seek(percent) {
     if (cfi) await state.rendition.display(cfi);
     return;
   }
-  state.pdfPage = normalizePDFPage(Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1);
+  state.pdfPage = normalizePage(Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1, state.pdf.numPages, pdfUsesSpread());
   await renderPDFPage();
   observe({ page: state.pdfPage });
 }
@@ -314,7 +315,7 @@ async function goToEdge(end) {
     else if (!end) await state.rendition.display();
     return;
   }
-  state.pdfPage = end ? normalizePDFPage(state.pdf.numPages) : 1;
+  state.pdfPage = end ? normalizePage(state.pdf.numPages, state.pdf.numPages, pdfUsesSpread()) : 1;
   await renderPDFPage();
   observe({ page: state.pdfPage });
 }
@@ -357,7 +358,7 @@ function previewProgress(percent) {
     document.querySelector("#reader-progress").textContent = `${Math.round(percent * 100)}% read`;
     return;
   }
-  const page = normalizePDFPage(Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1);
+  const page = normalizePage(Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1, state.pdf.numPages, pdfUsesSpread());
   const lastPage = pdfUsesSpread() && page > 1 ? Math.min(page + 1, state.pdf.numPages) : page;
   document.querySelector("#reader-progress").textContent = page === lastPage
     ? `Page ${page} of ${state.pdf.numPages}`
@@ -366,11 +367,6 @@ function previewProgress(percent) {
 
 function pdfUsesSpread() {
   return window.matchMedia("(min-width: 701px)").matches;
-}
-
-function normalizePDFPage(page, spread = pdfUsesSpread()) {
-  const value = Math.min(Math.max(Number(page) || 1, 1), state.pdf?.numPages || Number.MAX_SAFE_INTEGER);
-  return !spread || value === 1 ? value : 2 + Math.floor((value - 2) / 2) * 2;
 }
 
 function renderTOC(items, activate) {
@@ -415,8 +411,6 @@ function currentTOCLabel(href) {
   const button = [...document.querySelectorAll(".reader-toc-item")].find(item => tocKey(item.dataset.href) === key);
   return button?.textContent || "";
 }
-
-function tocKey(value) { return String(value || "").split("#")[0].split("?")[0].split("/").pop(); }
 
 function percentFor(cfi) {
   if (!state.locations || typeof state.locations.percentageFromCfi !== "function") return undefined;
@@ -668,11 +662,6 @@ function loadPreferences() {
   };
 }
 
-function boundedNumber(raw, fallback, min, max) {
-  const value = Number(raw);
-  return Number.isFinite(value) && value >= min && value <= max ? value : fallback;
-}
-
 function storageGet(key) { try { return localStorage.getItem(key); } catch { return null; } }
 function storageSet(key, value) { try { localStorage.setItem(key, value); } catch { /* Preferences are optional. */ } }
 function storageRemove(key) { try { localStorage.removeItem(key); } catch { /* Preferences are optional. */ } }
@@ -685,11 +674,5 @@ function fail(error) {
 }
 
 function deviceLabel() {
-  const ua = navigator.userAgent;
-  const brands = navigator.userAgentData?.brands?.map(item => item.brand).join(" ") || "";
-  const platform = navigator.userAgentData?.platform || "";
-  const browser = /Edge|Microsoft Edge/i.test(brands) || /Edg\//.test(ua) ? "Edge" : /Firefox/i.test(brands) || /Firefox\//.test(ua) ? "Firefox" : /Chrom/i.test(brands) || /CriOS|Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Other";
-  const source = `${platform} ${ua}`;
-  const os = /Android/i.test(source) ? "Android" : /iOS|iPad|iPhone|iPod/i.test(source) ? "iOS/iPadOS" : /macOS|Mac OS X/i.test(source) ? "macOS" : /Windows/i.test(source) ? "Windows" : /Linux/i.test(source) ? "Linux" : "Other";
-  return `${browser} on ${os}`.slice(0, 100);
+  return formatDeviceLabel({ userAgent: navigator.userAgent, brands: navigator.userAgentData?.brands, platform: navigator.userAgentData?.platform });
 }

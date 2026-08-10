@@ -345,6 +345,157 @@ func TestChangePasswordRequiresCSRFAndRevokesSessions(t *testing.T) {
 	}
 }
 
+func TestRemainingHandlerBranches(t *testing.T) {
+	app := newIntegrationApp(t)
+	defer app.dbClose()
+
+	resetUser, err := app.repo.CreateUser(context.Background(), "reset-target", passwordDigest("old password"), "user", time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create reset target: %v", err)
+	}
+	if rec := app.request("POST", "/admin/users/invalid/password", strings.NewReader(url.Values{
+		"csrf_token": {app.csrf}, "password": {"long enough"},
+	}.Encode()), true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid reset=%d", rec.Code)
+	}
+	if rec := app.request("POST", "/admin/users/"+stringID(resetUser.ID)+"/password", strings.NewReader(url.Values{
+		"csrf_token": {app.csrf}, "password": {"short"},
+	}.Encode()), true); rec.Code != http.StatusBadRequest {
+		t.Fatalf("short reset=%d", rec.Code)
+	}
+	if rec := app.request("POST", "/admin/users/"+stringID(resetUser.ID)+"/password", strings.NewReader(url.Values{
+		"csrf_token": {app.csrf}, "password": {"long enough"},
+	}.Encode()), true); rec.Code != http.StatusSeeOther {
+		t.Fatalf("valid reset=%d %s", rec.Code, rec.Body.String())
+	}
+
+	request := func(method, path, contentType, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Content-Type", contentType)
+		req.Header.Set("X-CSRF-Token", app.csrf)
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: app.session.Token})
+		rec := httptest.NewRecorder()
+		app.handler.ServeHTTP(rec, req)
+		return rec
+	}
+	bookPath := "/api/books/" + stringID(app.book.ID)
+	if rec := request(http.MethodPatch, bookPath, "application/json", `{"title":"Changed","public":false}`); rec.Code != http.StatusNoContent {
+		t.Fatalf("json patch=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := request(http.MethodPost, bookPath, "application/x-www-form-urlencoded", url.Values{
+		"_method": {"PATCH"}, "title": {"Form title"}, "csrf_token": {app.csrf}, "public": {"true"},
+	}.Encode()); rec.Code != http.StatusSeeOther {
+		t.Fatalf("form patch=%d", rec.Code)
+	}
+	if rec := request(http.MethodPost, bookPath, "application/x-www-form-urlencoded", url.Values{
+		"_method": {"DELETE"}, "csrf_token": {app.csrf}, "confirm": {"no"},
+	}.Encode()); rec.Code != http.StatusBadRequest {
+		t.Fatalf("unconfirmed delete=%d", rec.Code)
+	}
+	if rec := request(http.MethodPost, bookPath, "application/x-www-form-urlencoded", url.Values{
+		"_method": {"unsupported"}, "csrf_token": {app.csrf},
+	}.Encode()); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid method=%d", rec.Code)
+	}
+	if rec := request(http.MethodPost, bookPath, "application/json", `{"title":"No override"}`); rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("json post=%d", rec.Code)
+	}
+	if rec := request(http.MethodPatch, "/api/books/999", "application/json", `{}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing mutation=%d", rec.Code)
+	}
+	if rec := app.request("GET", "/books/999/read", nil, true); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing reader=%d", rec.Code)
+	}
+
+	progressPath := bookPath + "/progress"
+	if rec := app.request("GET", progressPath, nil, true); rec.Code != http.StatusOK {
+		t.Fatalf("empty progress=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := request(http.MethodPut, progressPath, "application/json", `{"page":99}`); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid progress=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := request(http.MethodPut, progressPath, "application/json", `{"page":2,"csrf_token":""}`); rec.Code != http.StatusOK {
+		t.Fatalf("body csrf progress=%d %s", rec.Code, rec.Body.String())
+	}
+	userSession, err := app.auth.CreateForUser(context.Background(), resetUser.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/admin/users", nil)
+	req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: userSession.Token})
+	rec := httptest.NewRecorder()
+	app.handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin users page=%d", rec.Code)
+	}
+	if rec := request(http.MethodPost, bookPath, "application/x-www-form-urlencoded", url.Values{
+		"_method": {"DELETE"}, "csrf_token": {app.csrf}, "confirm": {"yes"},
+	}.Encode()); rec.Code != http.StatusSeeOther {
+		t.Fatalf("confirmed delete=%d", rec.Code)
+	}
+}
+
+func TestUploadValidationBranches(t *testing.T) {
+	app := newIntegrationApp(t)
+	defer app.dbClose()
+
+	upload := func(parts ...struct{ name, filename, value string }) *httptest.ResponseRecorder {
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		for _, item := range parts {
+			if item.filename == "" {
+				if err := writer.WriteField(item.name, item.value); err != nil {
+					t.Fatal(err)
+				}
+				continue
+			}
+			part, err := writer.CreateFormFile(item.name, item.filename)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = io.WriteString(part, item.value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest("POST", "/api/books", &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("X-CSRF-Token", app.csrf)
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: app.session.Token})
+		rec := httptest.NewRecorder()
+		app.handler.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := upload(struct{ name, filename, value string }{"csrf_token", "", app.csrf}); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "no_books") {
+		t.Fatalf("no books=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := upload(
+		struct{ name, filename, value string }{"csrf_token", "", app.csrf},
+		struct{ name, filename, value string }{"private", "", "true"},
+		struct{ name, filename, value string }{"ignored", "", "value"},
+		struct{ name, filename, value string }{"covers[0]", "cover.png", "not an image"},
+		struct{ name, filename, value string }{"books[0]", "bad.txt", "not a book"},
+	); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "invalid_format") {
+		t.Fatalf("invalid book=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := upload(
+		struct{ name, filename, value string }{"csrf_token", "", app.csrf},
+		struct{ name, filename, value string }{"books[21]", "too-many.pdf", string(app.content)},
+	); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "too_many_books") {
+		t.Fatalf("too many books=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := upload(
+		struct{ name, filename, value string }{"csrf_token", "", app.csrf},
+		struct{ name, filename, value string }{"books[0]", "a.pdf", string(app.content)},
+		struct{ name, filename, value string }{"books[0]", "b.pdf", string(app.content)},
+	); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "duplicate_index") {
+		t.Fatalf("duplicate index=%d %s", rec.Code, rec.Body.String())
+	}
+}
+
 func epubFixture(t *testing.T, title, author string) []byte {
 	t.Helper()
 	var out bytes.Buffer

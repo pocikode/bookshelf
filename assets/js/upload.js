@@ -1,4 +1,5 @@
 import * as pdfjsLib from "pdfjs-dist";
+import { formatFileSize, isSupported } from "./upload-utils.js";
 
 const form = document.querySelector("#upload-form");
 let dropzone;
@@ -106,13 +107,6 @@ function renderFileList(files) {
     fileList.append(item);
   }
 }
-
-function formatFileSize(bytes) {
-  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function isSupported(file) { return /\.(epub|pdf)$/i.test(file.name); }
 
 function bindLibraryFilters(results) {
   const filterForm = results.querySelector(".library-filters");

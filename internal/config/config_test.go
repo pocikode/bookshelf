@@ -17,6 +17,7 @@ func TestFromEnv(t *testing.T) {
 		{"relative data", map[string]string{"APP_PASSWORD": "correct horse battery", "DATA_DIR": "data"}, "absolute"},
 		{"bad bool", map[string]string{"APP_PASSWORD": "correct horse battery", "TRUST_PROXY": "TRUE"}, "exactly true or false"},
 		{"bad level", map[string]string{"APP_PASSWORD": "correct horse battery", "LOG_LEVEL": "verbose"}, "LOG_LEVEL"},
+		{"bad port", map[string]string{"APP_PASSWORD": "correct horse battery", "PORT": "not-a-number"}, "PORT"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

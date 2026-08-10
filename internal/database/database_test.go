@@ -70,3 +70,124 @@ func TestOpenMigratePragmasAndRepositories(t *testing.T) {
 		t.Fatalf("progress did not cascade: %v", err)
 	}
 }
+
+func TestCheckpointAndRepositoryConvenienceMethods(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	repo := NewRepository(db)
+	book := Book{
+		OwnerID: 1, Public: true, Title: "Checkpoint", Category: "Reference",
+		Format: "epub", FileHash: "checkpoint", FilePath: "books/checkpoint.epub", FileSize: 1,
+		CreatedAt: time.Now().UTC(),
+	}
+	if err := repo.InsertBook(ctx, &book); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.UpsertProgress(ctx, &Progress{BookID: book.ID, Percent: 0.4}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	continued, err := repo.ContinueReading(ctx)
+	if err != nil || len(continued) != 0 {
+		t.Fatalf("continued: %+v, %v", continued, err)
+	}
+	continued, err = repo.ContinueReadingForUser(ctx, 1, true)
+	if err != nil || len(continued) != 1 || continued[0].ID != book.ID {
+		t.Fatalf("admin continued: %+v, %v", continued, err)
+	}
+	categories, err := repo.Categories(ctx)
+	if err != nil || len(categories) != 1 || categories[0] != book.Category {
+		t.Fatalf("categories: %v, %v", categories, err)
+	}
+	categories, err = repo.CategoriesForUser(ctx, 1, false)
+	if err != nil || len(categories) != 1 || categories[0] != book.Category {
+		t.Fatalf("user categories: %v, %v", categories, err)
+	}
+	if err := Checkpoint(ctx, db); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRepositoryMissingRecords(t *testing.T) {
+	ctx := context.Background()
+	repo := testRepository(t)
+	if _, err := repo.FindUserByUsername(ctx, "missing"); !IsNotFound(err) {
+		t.Fatalf("missing username: %v", err)
+	}
+	if _, err := repo.FindUser(ctx, 999); !IsNotFound(err) {
+		t.Fatalf("missing user: %v", err)
+	}
+	if _, err := repo.GetUserPasswordDigest(ctx, 999); !IsNotFound(err) {
+		t.Fatalf("missing password digest: %v", err)
+	}
+	if _, err := repo.GetPasswordCredential(ctx); !IsNotFound(err) {
+		t.Fatalf("missing credential: %v", err)
+	}
+	if _, err := repo.FindSession(ctx, "missing"); !IsNotFound(err) {
+		t.Fatalf("missing session: %v", err)
+	}
+	if _, err := repo.CreateUser(ctx, "admin", "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", "user", time.Now().UTC()); err == nil {
+		t.Fatal("duplicate user was accepted")
+	}
+	if _, err := repo.DB.ExecContext(ctx, `UPDATE users SET created_at='bad' WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.FindUser(ctx, 1); err == nil {
+		t.Fatal("invalid user timestamp was accepted")
+	}
+	if _, err := repo.FindUserByUsername(ctx, "admin"); err == nil {
+		t.Fatal("invalid username timestamp was accepted")
+	}
+	if _, err := repo.ListUsers(ctx); err == nil {
+		t.Fatal("invalid list timestamp was accepted")
+	}
+	book := Book{Title: "bad timestamp", Format: "epub", FileHash: "bad-timestamp", FilePath: "books/bad.epub", FileSize: 1, CreatedAt: time.Now().UTC()}
+	if err := repo.InsertBook(ctx, &book); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB.ExecContext(ctx, `UPDATE books SET created_at='bad' WHERE id=?`, book.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.FindBook(ctx, book.ID); err == nil {
+		t.Fatal("invalid book timestamp was accepted")
+	}
+	if err := repo.UpsertProgress(ctx, &Progress{BookID: book.ID, Percent: 0.2}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB.ExecContext(ctx, `UPDATE books SET created_at=? WHERE id=?`, stamp(time.Now().UTC()), book.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB.ExecContext(ctx, `UPDATE reading_progress SET updated_at='bad' WHERE book_id=?`, book.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.FindBook(ctx, book.ID); err == nil {
+		t.Fatal("invalid progress timestamp was accepted")
+	}
+	session := Session{TokenHash: "bad-session", PasswordBinding: "binding", CreatedAt: time.Now().UTC(), LastSeenAt: time.Now().UTC(), ExpiresAt: time.Now().Add(time.Hour)}
+	if err := repo.CreateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.DB.ExecContext(ctx, `UPDATE sessions SET created_at='bad' WHERE token_hash=?`, session.TokenHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.FindSession(ctx, session.TokenHash); err == nil {
+		t.Fatal("invalid session timestamp was accepted")
+	}
+	if _, err := repo.DB.ExecContext(ctx, `UPDATE sessions SET created_at=?,last_seen_at='bad' WHERE token_hash=?`, stamp(session.CreatedAt), session.TokenHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.FindSession(ctx, session.TokenHash); err == nil {
+		t.Fatal("invalid session last-seen timestamp was accepted")
+	}
+	if _, err := repo.DB.ExecContext(ctx, `UPDATE sessions SET last_seen_at=?,expires_at='bad' WHERE token_hash=?`, stamp(session.LastSeenAt), session.TokenHash); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.FindSession(ctx, session.TokenHash); err == nil {
+		t.Fatal("invalid session expiry timestamp was accepted")
+	}
+}

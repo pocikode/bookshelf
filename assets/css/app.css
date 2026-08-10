@@ -357,8 +357,10 @@
   .reader-tap-zone { display: block; }
   .reader-footer { gap: .55rem; }
   .reader-nav-button { min-width: 3.25rem; }
-   #pdf-spread { width: fit-content; min-width: 100%; }
-  #pdf-spread .pdf-sheet:not(:first-child) { display: none; }
+   #pdf-spread { width: 100%; max-width: 100%; }
+   #pdf-spread .pdf-sheet { max-width: 100%; }
+   #pdf-spread canvas { max-width: 100%; }
+   #pdf-spread .pdf-sheet:not(:first-child) { display: none; }
 }
 
 @media (max-width: 480px) {
