@@ -26,6 +26,7 @@ import (
 	"pocikode/bookshelf/internal/library"
 	"pocikode/bookshelf/internal/progress"
 	"pocikode/bookshelf/internal/ratelimit"
+	"pocikode/bookshelf/internal/version"
 )
 
 type integrationApp struct {
@@ -106,6 +107,32 @@ func TestLoginFailureKeepsUsername(t *testing.T) {
 	}
 	if !strings.Contains(rec.Body.String(), `name="username" value="admin"`) {
 		t.Fatalf("username was not preserved: %s", rec.Body.String())
+	}
+}
+
+func TestVersionIsPublicAndRendered(t *testing.T) {
+	app := newIntegrationApp(t)
+	defer app.dbClose()
+
+	api := app.request("GET", "/api/version", nil, false)
+	if api.Code != http.StatusOK || api.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("version response=%d content-type=%q", api.Code, api.Header().Get("Content-Type"))
+	}
+	var payload struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(api.Body.Bytes(), &payload); err != nil || payload.Version != version.Version {
+		t.Fatalf("version payload=%q err=%v", payload.Version, err)
+	}
+
+	login := app.request("GET", "/login", nil, false)
+	if !strings.Contains(login.Body.String(), "private library · "+version.Version) {
+		t.Fatalf("login page omitted version: %s", login.Body.String())
+	}
+
+	library := app.request("GET", "/", nil, true)
+	if !strings.Contains(library.Body.String(), "private library · "+version.Version) {
+		t.Fatalf("library header omitted version: %s", library.Body.String())
 	}
 }
 func TestAuthenticatedFileRangesAndConditionals(t *testing.T) {

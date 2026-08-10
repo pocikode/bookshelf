@@ -19,6 +19,7 @@ import (
 	"pocikode/bookshelf/internal/library"
 	"pocikode/bookshelf/internal/progress"
 	"pocikode/bookshelf/internal/ratelimit"
+	"pocikode/bookshelf/internal/version"
 	"pocikode/bookshelf/internal/web"
 )
 
@@ -44,8 +45,14 @@ func run(args []string) error {
 			return errors.New("healthcheck accepts no arguments")
 		}
 		return healthcheck()
+	case "version":
+		if len(args) > 1 {
+			return errors.New("version accepts no arguments")
+		}
+		fmt.Println(version.Version)
+		return nil
 	default:
-		return fmt.Errorf("unknown command %q (use serve or healthcheck)", command)
+		return fmt.Errorf("unknown command %q (use serve, healthcheck, or version)", command)
 	}
 }
 

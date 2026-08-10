@@ -67,6 +67,7 @@
   .brand-mark svg { width: 1.1rem; height: 1.1rem; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.5; }
   .site-header { position: relative; z-index: 10; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--canvas) 92%, transparent); backdrop-filter: blur(12px); }
   .site-header-inner { display: flex; min-height: 4.6rem; align-items: center; justify-content: space-between; }
+  .reader-version { color: var(--muted); font-family: var(--font-mono); font-size: .6rem; letter-spacing: .04em; }
   .site-nav { display: flex; align-items: center; gap: .2rem; }
   .nav-link { border-bottom: 1px solid transparent; padding: .45rem .65rem; color: var(--muted); font-size: .78rem; transition: color .2s ease, border-color .2s ease; }
   .nav-link:hover, .nav-link-active { border-color: var(--ink); color: var(--ink); }

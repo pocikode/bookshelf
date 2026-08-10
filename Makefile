@@ -1,3 +1,6 @@
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf 'dev')
+LDFLAGS = -s -w -X pocikode/bookshelf/internal/version.Version=$(VERSION)
+
 .PHONY: assets check dev test build clean
 
 assets:
@@ -16,10 +19,10 @@ test: assets check
 	go test -race -cover ./...
 
 build: assets check
-	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o bookshelf ./cmd/bookshelf
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bookshelf ./cmd/bookshelf
 
 dev: assets check
-	go build ./cmd/bookshelf
+	go build -ldflags="$(LDFLAGS)" ./cmd/bookshelf
 
 clean:
 	find internal/web/dist -type f ! -name .gitkeep -delete

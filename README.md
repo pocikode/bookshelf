@@ -14,6 +14,10 @@ To update an existing deployment to the latest published image:
 ./scripts/deploy.sh
 ```
 
+Release builds embed the Git tag in the application. The same value is
+available at `GET /api/version`, in the login and application headers, and from
+the binary with `bookshelf version`.
+
 No configuration is required. Every variable has a default, and without `APP_PASSWORD` the login password is `123456`. Startup logs a warning while that default is in use:
 
 ```sh

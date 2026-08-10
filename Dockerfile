@@ -9,12 +9,13 @@ COPY internal/web/templates ./internal/web/templates
 RUN bun run build
 
 FROM docker.io/library/golang:1.26.5-alpine AS build
+ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=assets /src/internal/web/dist ./internal/web/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/bookshelf ./cmd/bookshelf
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X pocikode/bookshelf/internal/version.Version=${VERSION}" -o /out/bookshelf ./cmd/bookshelf
 # Staged empty tree so the runtime data directory exists and is owned by the
 # unprivileged runtime user; distroless has no shell to mkdir it later.
 RUN mkdir -p /out/data

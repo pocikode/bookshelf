@@ -31,6 +31,7 @@ import (
 	"pocikode/bookshelf/internal/library"
 	"pocikode/bookshelf/internal/progress"
 	"pocikode/bookshelf/internal/ratelimit"
+	"pocikode/bookshelf/internal/version"
 )
 
 const themeScript = `(()=>{try{const t=localStorage.getItem("bookshelf:v1:theme");const d=t==="dark"||(t!=="light"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.classList.toggle("dark",d)}catch{}})();`
@@ -82,6 +83,9 @@ func (s *Server) routes() http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.WriteHeader(http.StatusOK)
 		_, _ = io.WriteString(w, "ok\n")
+	})
+	r.Get("/api/version", func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]string{"version": version.Version})
 	})
 	r.Handle("/assets/*", s.assets)
 	r.Get("/login", s.loginPage)
@@ -306,6 +310,7 @@ func safeReturn(v string) bool {
 
 type libraryView struct {
 	ThemeScript           template.JS
+	Version               string
 	CSRF                  string
 	Books, Continue       []bookView
 	Categories            []string
@@ -364,7 +369,7 @@ func (s *Server) libraryPage(w http.ResponseWriter, r *http.Request) {
 	pages := maxInt(1, (total+59)/60)
 	session := currentSession(r)
 	csrf := s.dep.Auth.CSRFToken(session)
-	view := libraryView{CSRF: csrf, Books: projectBooks(books, csrf, user), Continue: projectBooks(continued, csrf, user), Categories: categories, Flash: s.flash.Take(session.TokenHash), Query: q, Category: opts.Category, Sort: sortKey, Total: total, Page: page, Pages: pages, User: user}
+	view := libraryView{CSRF: csrf, Version: version.Version, Books: projectBooks(books, csrf, user), Continue: projectBooks(continued, csrf, user), Categories: categories, Flash: s.flash.Take(session.TokenHash), Query: q, Category: opts.Category, Sort: sortKey, Total: total, Page: page, Pages: pages, User: user}
 	if page > 1 {
 		view.PrevURL = pageURL(r, page-1)
 	}
@@ -979,7 +984,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	wrapper := map[string]any{"ThemeScript": template.JS(themeScript)}
+	wrapper := map[string]any{"ThemeScript": template.JS(themeScript), "Version": version.Version}
 	switch value := data.(type) {
 	case map[string]any:
 		for k, v := range value {

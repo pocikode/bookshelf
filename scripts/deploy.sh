@@ -23,7 +23,9 @@ image_id=$(docker inspect --format '{{.Image}}' "$container_id")
 image_digest=$(docker image inspect --format '{{join .RepoDigests "\n"}}' "$image_id" | sed -n '1p')
 
 echo "Deployment complete."
+running_version=$(docker compose run --rm --no-deps bookshelf version)
 echo "Image: $image_ref"
+echo "Version: $running_version"
 echo "Image ID: $image_id"
 if [ -n "$image_digest" ]; then
   echo "Image digest: $image_digest"
