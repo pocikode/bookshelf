@@ -174,7 +174,7 @@ func TestLibraryFilterFragment(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("filter fragment status=%d", rec.Code)
 	}
-	if strings.Contains(rec.Body.String(), "<!doctype html>") || !strings.Contains(rec.Body.String(), `id="library-results"`) || !strings.Contains(rec.Body.String(), "Range Test") {
+	if strings.Contains(rec.Body.String(), "<!doctype html>") || !strings.Contains(rec.Body.String(), `id="library-results"`) || !strings.Contains(rec.Body.String(), "Range Test") || !strings.Contains(rec.Body.String(), `aria-label="File format: pdf">pdf</span>`) {
 		t.Fatalf("unexpected filter fragment: %s", rec.Body.String())
 	}
 }

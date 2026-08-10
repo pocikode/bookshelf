@@ -132,7 +132,7 @@
 <article class="book-card group">
   <a href="/books/{{.ID}}/read" class="block focus-ring">
     {{if .HasCover}}<img class="book-cover" src="/api/books/{{.ID}}/cover" alt="Cover of {{.Title}}" loading="lazy">{{else}}<div class="cover-placeholder"><span>{{.Title}}</span></div>{{end}}
-    <div class="book-card-body"><div class="book-card-heading"><h3>{{.Title}}</h3>{{if .Category}}<span class="book-tag">{{.Category}}</span>{{end}}</div><p class="book-author">{{if .Author}}{{.Author}}{{else}}Unknown author{{end}}</p><div class="progress-meta"><span>{{percent .Percent}}% read</span><span class="progress-track"><span style="width:{{percent .Percent}}%"></span></span></div></div>
+    <div class="book-card-body"><div class="book-card-heading"><h3>{{.Title}}</h3><span class="book-format" aria-label="File format: {{.Format}}">{{.Format}}</span>{{if .Category}}<span class="book-tag">{{.Category}}</span>{{end}}</div><p class="book-author">{{if .Author}}{{.Author}}{{else}}Unknown author{{end}}</p><div class="progress-meta"><span>{{percent .Percent}}% read</span><span class="progress-track"><span style="width:{{percent .Percent}}%"></span></span></div></div>
   </a>
   <details class="book-actions">
      <summary>{{if .CanManage}}Edit or delete{{else}}Book details{{end}}</summary>

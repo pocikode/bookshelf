@@ -317,20 +317,20 @@ type libraryView struct {
 }
 
 type bookView struct {
-	ID                      int64
-	Title, Author, Category string
-	HasCover                bool
-	Percent                 float64
-	CSRF                    string
-	OwnerID                 int64
-	Public                  bool
-	CanManage               bool
+	ID                              int64
+	Title, Author, Category, Format string
+	HasCover                        bool
+	Percent                         float64
+	CSRF                            string
+	OwnerID                         int64
+	Public                          bool
+	CanManage                       bool
 }
 
 func projectBooks(books []database.Book, csrf string, user database.User) []bookView {
 	out := make([]bookView, 0, len(books))
 	for _, book := range books {
-		out = append(out, bookView{ID: book.ID, Title: book.Title, Author: book.Author, Category: book.Category, HasCover: book.CoverPath != "", Percent: book.Percent, CSRF: csrf, OwnerID: book.OwnerID, Public: book.Public, CanManage: user.IsAdmin() || book.OwnerID == user.ID})
+		out = append(out, bookView{ID: book.ID, Title: book.Title, Author: book.Author, Category: book.Category, Format: book.Format, HasCover: book.CoverPath != "", Percent: book.Percent, CSRF: csrf, OwnerID: book.OwnerID, Public: book.Public, CanManage: user.IsAdmin() || book.OwnerID == user.ID})
 	}
 	return out
 }
