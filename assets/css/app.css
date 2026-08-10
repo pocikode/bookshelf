@@ -82,6 +82,16 @@
   .field::placeholder { color: var(--faint); }
   .field:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(52,101,56,.1); outline: 0; }
   .form-label { display: grid; gap: .45rem; color: var(--ink); font-size: .75rem; font-weight: 650; }
+  .visibility-control { display: grid; grid-template-columns: 1.1rem 1fr; grid-template-rows: auto auto; column-gap: .7rem; align-items: center; margin-top: .35rem; color: var(--ink); cursor: pointer; }
+  .visibility-control > span:last-child { grid-column: 2; grid-row: 1 / span 2; display: grid; gap: .15rem; }
+  .visibility-control strong { font-size: .76rem; font-weight: 650; }
+  .visibility-control small { color: var(--muted); font-size: .68rem; font-weight: 450; line-height: 1.35; }
+  .visibility-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .visibility-box { grid-column: 1; grid-row: 1 / span 2; width: 1.05rem; height: 1.05rem; border: 1px solid var(--line-strong); background: var(--surface); display: grid; place-items: center; transition: background .15s ease, border-color .15s ease; }
+  .visibility-box::after { content: ""; width: .32rem; height: .58rem; border: solid var(--surface); border-width: 0 2px 2px 0; transform: rotate(45deg) scale(0); transition: transform .15s ease; }
+  .visibility-input:checked + .visibility-box { background: var(--ink); border-color: var(--ink); }
+  .visibility-input:checked + .visibility-box::after { transform: rotate(45deg) scale(1); }
+  .visibility-input:focus-visible + .visibility-box { outline: 2px solid var(--ink); outline-offset: 3px; }
   .form-label > span, .form-label span { color: var(--muted); font-weight: 450; }
 
   .library-main { padding-block: 4.5rem 7rem; }

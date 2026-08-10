@@ -24,20 +24,94 @@ func (r *Repository) GetPasswordCredential(ctx context.Context) (PasswordCredent
 	return credential, err
 }
 
+func (r *Repository) FindUserByUsername(ctx context.Context, username string) (User, error) {
+	var u User
+	var created string
+	err := r.DB.QueryRowContext(ctx, `SELECT id,username,role,created_at,disabled FROM users WHERE username=?`, username).Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled)
+	if err != nil {
+		return u, err
+	}
+	u.CreatedAt, err = parseStamp(created)
+	return u, err
+}
+func (r *Repository) FindUser(ctx context.Context, id int64) (User, error) {
+	var u User
+	var created string
+	err := r.DB.QueryRowContext(ctx, `SELECT id,username,role,created_at,disabled FROM users WHERE id=?`, id).Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled)
+	if err != nil {
+		return u, err
+	}
+	u.CreatedAt, err = parseStamp(created)
+	return u, err
+}
+func (r *Repository) ListUsers(ctx context.Context) ([]User, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT id,username,role,created_at,disabled FROM users ORDER BY LOWER(username),id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []User
+	for rows.Next() {
+		var u User
+		var created string
+		if err := rows.Scan(&u.ID, &u.Username, &u.Role, &created, &u.Disabled); err != nil {
+			return nil, err
+		}
+		u.CreatedAt, err = parseStamp(created)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, u)
+	}
+	return out, rows.Err()
+}
+func (r *Repository) CreateUser(ctx context.Context, username, digest, role string, created time.Time) (User, error) {
+	res, err := r.DB.ExecContext(ctx, `INSERT INTO users(username,password_digest,role,created_at) VALUES(?,?,?,?)`, username, digest, role, stamp(created))
+	if err != nil {
+		return User{}, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return User{}, err
+	}
+	return User{ID: id, Username: username, Role: role, CreatedAt: created}, nil
+}
+func (r *Repository) SetUserPassword(ctx context.Context, id int64, digest string) error {
+	_, err := r.DB.ExecContext(ctx, `UPDATE users SET password_digest=? WHERE id=?`, digest, id)
+	return err
+}
+func (r *Repository) GetUserPasswordDigest(ctx context.Context, id int64) (string, error) {
+	var digest string
+	err := r.DB.QueryRowContext(ctx, `SELECT password_digest FROM users WHERE id=?`, id).Scan(&digest)
+	return digest, err
+}
+func (r *Repository) EnsureAdmin(ctx context.Context, digest string, created time.Time) error {
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO users(id,username,password_digest,role,created_at) VALUES(1,'admin',?,'admin',?) ON CONFLICT(id) DO UPDATE SET password_digest=excluded.password_digest`, digest, stamp(created))
+	return err
+}
+func (r *Repository) DeleteUserSessions(ctx context.Context, id int64) error {
+	_, err := r.DB.ExecContext(ctx, `DELETE FROM sessions WHERE user_id=?`, id)
+	return err
+}
+func (r *Repository) SetUserDisabled(ctx context.Context, id int64, disabled bool) error {
+	_, err := r.DB.ExecContext(ctx, `UPDATE users SET disabled=? WHERE id=?`, disabled, id)
+	return err
+}
+
 func (r *Repository) SetPasswordCredential(ctx context.Context, credential PasswordCredential) error {
 	_, err := r.DB.ExecContext(ctx, `INSERT INTO password_credentials(id,password_digest,updated_at) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET password_digest=excluded.password_digest,updated_at=excluded.updated_at`, credential.Digest, stamp(credential.UpdatedAt))
 	return err
 }
 
 func (r *Repository) CreateSession(ctx context.Context, s Session) error {
-	_, err := r.DB.ExecContext(ctx, `INSERT INTO sessions(token_hash,password_binding,created_at,last_seen_at,expires_at,user_agent) VALUES(?,?,?,?,?,?)`, s.TokenHash, s.PasswordBinding, stamp(s.CreatedAt), stamp(s.LastSeenAt), stamp(s.ExpiresAt), s.UserAgent)
+	_, err := r.DB.ExecContext(ctx, `INSERT INTO sessions(token_hash,password_binding,created_at,last_seen_at,expires_at,user_agent,user_id) VALUES(?,?,?,?,?,?,?)`, s.TokenHash, s.PasswordBinding, stamp(s.CreatedAt), stamp(s.LastSeenAt), stamp(s.ExpiresAt), s.UserAgent, nullInt64(s.UserID))
 	return err
 }
 
 func (r *Repository) FindSession(ctx context.Context, tokenHash string) (Session, error) {
 	var s Session
 	var created, seen, expires string
-	err := r.DB.QueryRowContext(ctx, `SELECT token_hash,password_binding,created_at,last_seen_at,expires_at,COALESCE(user_agent,'') FROM sessions WHERE token_hash=?`, tokenHash).Scan(&s.TokenHash, &s.PasswordBinding, &created, &seen, &expires, &s.UserAgent)
+	err := r.DB.QueryRowContext(ctx, `SELECT token_hash,password_binding,created_at,last_seen_at,expires_at,COALESCE(user_agent,''),COALESCE(user_id,1) FROM sessions WHERE token_hash=?`, tokenHash).Scan(&s.TokenHash, &s.PasswordBinding, &created, &seen, &expires, &s.UserAgent, &s.UserID)
 	if err != nil {
 		return s, err
 	}
@@ -74,7 +148,8 @@ func (r *Repository) SweepSessions(ctx context.Context, now time.Time) (int64, e
 }
 
 func (r *Repository) InsertBook(ctx context.Context, b *Book) error {
-	res, err := r.DB.ExecContext(ctx, `INSERT INTO books(title,author,category,format,file_hash,file_path,file_size,cover_path,page_count,language,publisher,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, b.Title, nullString(b.Author), b.Category, b.Format, b.FileHash, b.FilePath, b.FileSize, nullString(b.CoverPath), nullInt(b.PageCount), nullString(b.Language), nullString(b.Publisher), stamp(b.CreatedAt))
+	owner := nullInt64(b.OwnerID)
+	res, err := r.DB.ExecContext(ctx, `INSERT INTO books(owner_id,is_public,title,author,category,format,file_hash,file_path,file_size,cover_path,page_count,language,publisher,created_at) VALUES(?,CASE WHEN ? IS NULL THEN 1 ELSE ? END,?,?,?,?,?,?,?,?,?,?,?,?)`, owner, owner, b.Public, b.Title, nullString(b.Author), b.Category, b.Format, b.FileHash, b.FilePath, b.FileSize, nullString(b.CoverPath), nullInt(b.PageCount), nullString(b.Language), nullString(b.Publisher), stamp(b.CreatedAt))
 	if err != nil {
 		return err
 	}
@@ -82,13 +157,13 @@ func (r *Repository) InsertBook(ctx context.Context, b *Book) error {
 	return err
 }
 
-const bookColumns = `b.id,b.title,COALESCE(b.author,''),b.category,b.format,b.file_hash,b.file_path,b.file_size,COALESCE(b.cover_path,''),COALESCE(b.page_count,0),COALESCE(b.language,''),COALESCE(b.publisher,''),b.created_at,COALESCE(p.percent,0),p.updated_at`
+const bookColumns = `b.id,COALESCE(b.owner_id,1),b.is_public,b.title,COALESCE(b.author,''),b.category,b.format,b.file_hash,b.file_path,b.file_size,COALESCE(b.cover_path,''),COALESCE(b.page_count,0),COALESCE(b.language,''),COALESCE(b.publisher,''),b.created_at,COALESCE(p.percent,0),p.updated_at`
 
 func scanBook(scanner interface{ Scan(...any) error }) (Book, error) {
 	var b Book
 	var created string
 	var last sql.NullString
-	err := scanner.Scan(&b.ID, &b.Title, &b.Author, &b.Category, &b.Format, &b.FileHash, &b.FilePath, &b.FileSize, &b.CoverPath, &b.PageCount, &b.Language, &b.Publisher, &created, &b.Percent, &last)
+	err := scanner.Scan(&b.ID, &b.OwnerID, &b.Public, &b.Title, &b.Author, &b.Category, &b.Format, &b.FileHash, &b.FilePath, &b.FileSize, &b.CoverPath, &b.PageCount, &b.Language, &b.Publisher, &created, &b.Percent, &last)
 	if err != nil {
 		return b, err
 	}
@@ -109,8 +184,15 @@ func scanBook(scanner interface{ Scan(...any) error }) (Book, error) {
 func (r *Repository) FindBook(ctx context.Context, id int64) (Book, error) {
 	return scanBook(r.DB.QueryRowContext(ctx, `SELECT `+bookColumns+` FROM books b LEFT JOIN reading_progress p ON p.book_id=b.id WHERE b.id=?`, id))
 }
+func (r *Repository) FindBookForUser(ctx context.Context, id, userID int64, admin bool) (Book, error) {
+	where := `b.id=? AND (b.is_public=1 OR b.owner_id=? OR ?=1)`
+	return scanBook(r.DB.QueryRowContext(ctx, `SELECT `+bookColumns+` FROM books b LEFT JOIN reading_progress p ON p.book_id=b.id AND p.user_id=? WHERE `+where, userID, id, userID, admin))
+}
 func (r *Repository) FindBookByHash(ctx context.Context, hash string) (Book, error) {
 	return scanBook(r.DB.QueryRowContext(ctx, `SELECT `+bookColumns+` FROM books b LEFT JOIN reading_progress p ON p.book_id=b.id WHERE b.file_hash=?`, hash))
+}
+func (r *Repository) FindBookByHashForUser(ctx context.Context, hash, userID int64, admin bool) (Book, error) {
+	return scanBook(r.DB.QueryRowContext(ctx, `SELECT `+bookColumns+` FROM books b LEFT JOIN reading_progress p ON p.book_id=b.id AND p.user_id=? WHERE b.file_hash=? AND (b.is_public=1 OR b.owner_id=? OR ?=1)`, userID, hash, userID, admin))
 }
 
 func (r *Repository) ListBooks(ctx context.Context, o BookListOptions) ([]Book, int, error) {
@@ -131,6 +213,10 @@ func (r *Repository) ListBooks(ctx context.Context, o BookListOptions) ([]Book, 
 	}
 	where := []string{"1=1"}
 	args := []any{}
+	if !o.Admin {
+		where = append(where, "(b.is_public=1 OR b.owner_id=?)")
+		args = append(args, o.UserID)
+	}
 	if o.Query != "" {
 		q := "%" + escapeLike(o.Query) + "%"
 		where = append(where, `(b.title LIKE ? ESCAPE '\' OR COALESCE(b.author,'') LIKE ? ESCAPE '\')`)
@@ -145,8 +231,10 @@ func (r *Repository) ListBooks(ctx context.Context, o BookListOptions) ([]Book, 
 	if err := r.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM books b WHERE `+clause, args...).Scan(&count); err != nil {
 		return nil, 0, err
 	}
-	query := `SELECT ` + bookColumns + ` FROM books b LEFT JOIN reading_progress p ON p.book_id=b.id WHERE ` + clause + ` ORDER BY ` + sortExpr + ` ` + direction + `, b.id DESC LIMIT ? OFFSET ?`
-	rows, err := r.DB.QueryContext(ctx, query, append(args, o.Limit, (o.Page-1)*o.Limit)...)
+	progressUser := o.UserID
+	query := `SELECT ` + bookColumns + ` FROM books b LEFT JOIN reading_progress p ON p.book_id=b.id AND p.user_id=? WHERE ` + clause + ` ORDER BY ` + sortExpr + ` ` + direction + `, b.id DESC LIMIT ? OFFSET ?`
+	queryArgs := append([]any{progressUser}, args...)
+	rows, err := r.DB.QueryContext(ctx, query, append(queryArgs, o.Limit, (o.Page-1)*o.Limit)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -163,7 +251,16 @@ func (r *Repository) ListBooks(ctx context.Context, o BookListOptions) ([]Book, 
 }
 
 func (r *Repository) ContinueReading(ctx context.Context) ([]Book, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT `+bookColumns+` FROM books b JOIN reading_progress p ON p.book_id=b.id WHERE p.percent>0 AND p.percent<0.995 ORDER BY p.updated_at DESC LIMIT 6`)
+	return r.ContinueReadingForUser(ctx, 0, true)
+}
+func (r *Repository) ContinueReadingForUser(ctx context.Context, userID int64, admin bool) ([]Book, error) {
+	visibility := "(b.is_public=1 OR b.owner_id=?)"
+	args := []any{userID}
+	if admin {
+		visibility = "1=1"
+		args = nil
+	}
+	rows, err := r.DB.QueryContext(ctx, `SELECT `+bookColumns+` FROM books b JOIN reading_progress p ON p.book_id=b.id AND p.user_id=? WHERE p.percent>0 AND p.percent<0.995 AND `+visibility+` ORDER BY p.updated_at DESC LIMIT 6`, append([]any{userID}, args...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +276,14 @@ func (r *Repository) ContinueReading(ctx context.Context) ([]Book, error) {
 	return out, rows.Err()
 }
 func (r *Repository) Categories(ctx context.Context) ([]string, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT DISTINCT category FROM books ORDER BY LOWER(category),category`)
+	return r.CategoriesForUser(ctx, 0, true)
+}
+func (r *Repository) CategoriesForUser(ctx context.Context, userID int64, admin bool) ([]string, error) {
+	where, args := "1=1", []any{}
+	if !admin {
+		where, args = "(is_public=1 OR owner_id=?)", []any{userID}
+	}
+	rows, err := r.DB.QueryContext(ctx, `SELECT DISTINCT category FROM books WHERE `+where+` ORDER BY LOWER(category),category`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -205,6 +309,10 @@ func (r *Repository) UpdateBook(ctx context.Context, id int64, title, author, ca
 	}
 	return nil
 }
+func (r *Repository) UpdateBookVisibility(ctx context.Context, id int64, public bool) error {
+	_, err := r.DB.ExecContext(ctx, `UPDATE books SET is_public=? WHERE id=?`, public, id)
+	return err
+}
 func (r *Repository) DeleteBookTx(ctx context.Context, id int64) error {
 	tx, err := r.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -223,9 +331,15 @@ func (r *Repository) DeleteBookTx(ctx context.Context, id int64) error {
 }
 
 func (r *Repository) GetProgress(ctx context.Context, bookID int64) (Progress, error) {
+	return r.GetProgressForUser(ctx, 0, bookID)
+}
+func (r *Repository) GetProgressForUser(ctx context.Context, userID, bookID int64) (Progress, error) {
+	if userID == 0 {
+		userID = 1
+	}
 	var p Progress
 	var updated string
-	err := r.DB.QueryRowContext(ctx, `SELECT book_id,COALESCE(position,''),COALESCE(page,0),percent,COALESCE(device_label,''),updated_at FROM reading_progress WHERE book_id=?`, bookID).Scan(&p.BookID, &p.Position, &p.Page, &p.Percent, &p.DeviceLabel, &updated)
+	err := r.DB.QueryRowContext(ctx, `SELECT user_id,book_id,COALESCE(position,''),COALESCE(page,0),percent,COALESCE(device_label,''),updated_at FROM reading_progress WHERE user_id=? AND book_id=?`, userID, bookID).Scan(&p.UserID, &p.BookID, &p.Position, &p.Page, &p.Percent, &p.DeviceLabel, &updated)
 	if err != nil {
 		return p, err
 	}
@@ -233,12 +347,18 @@ func (r *Repository) GetProgress(ctx context.Context, bookID int64) (Progress, e
 	return p, err
 }
 func (r *Repository) UpsertProgress(ctx context.Context, p *Progress, preservePercent bool) error {
+	return r.UpsertProgressForUser(ctx, p, preservePercent)
+}
+func (r *Repository) UpsertProgressForUser(ctx context.Context, p *Progress, preservePercent bool) error {
+	if p.UserID == 0 {
+		p.UserID = 1
+	}
 	var updated string
 	var err error
 	if preservePercent {
-		err = r.DB.QueryRowContext(ctx, `INSERT INTO reading_progress(book_id,position,page,percent,device_label,updated_at) VALUES(?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(book_id) DO UPDATE SET position=excluded.position,page=excluded.page,device_label=excluded.device_label,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING updated_at`, p.BookID, p.Position, nullInt(p.Page), 0, nullString(p.DeviceLabel)).Scan(&updated)
+		err = r.DB.QueryRowContext(ctx, `INSERT INTO reading_progress(user_id,book_id,position,page,percent,device_label,updated_at) VALUES(?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(user_id,book_id) DO UPDATE SET position=excluded.position,page=excluded.page,device_label=excluded.device_label,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING updated_at`, p.UserID, p.BookID, p.Position, nullInt(p.Page), 0, nullString(p.DeviceLabel)).Scan(&updated)
 	} else {
-		err = r.DB.QueryRowContext(ctx, `INSERT INTO reading_progress(book_id,position,page,percent,device_label,updated_at) VALUES(?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(book_id) DO UPDATE SET position=excluded.position,page=excluded.page,percent=excluded.percent,device_label=excluded.device_label,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING updated_at`, p.BookID, p.Position, nullInt(p.Page), p.Percent, nullString(p.DeviceLabel)).Scan(&updated)
+		err = r.DB.QueryRowContext(ctx, `INSERT INTO reading_progress(user_id,book_id,position,page,percent,device_label,updated_at) VALUES(?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(user_id,book_id) DO UPDATE SET position=excluded.position,page=excluded.page,percent=excluded.percent,device_label=excluded.device_label,updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') RETURNING updated_at`, p.UserID, p.BookID, p.Position, nullInt(p.Page), p.Percent, nullString(p.DeviceLabel)).Scan(&updated)
 	}
 	if err == nil {
 		p.UpdatedAt, err = parseStamp(updated)
@@ -265,6 +385,12 @@ func nullString(s string) any {
 	return s
 }
 func nullInt(n int) any {
+	if n == 0 {
+		return nil
+	}
+	return n
+}
+func nullInt64(n int64) any {
 	if n == 0 {
 		return nil
 	}

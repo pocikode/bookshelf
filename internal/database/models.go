@@ -3,6 +3,7 @@ package database
 import "time"
 
 type Session struct {
+	UserID          int64
 	TokenHash       string
 	PasswordBinding string
 	CreatedAt       time.Time
@@ -11,6 +12,16 @@ type Session struct {
 	UserAgent       string
 }
 
+type User struct {
+	ID        int64
+	Username  string
+	Role      string
+	CreatedAt time.Time
+	Disabled  bool
+}
+
+func (u User) IsAdmin() bool { return u.Role == "admin" }
+
 type PasswordCredential struct {
 	Digest    string
 	UpdatedAt time.Time
@@ -18,6 +29,8 @@ type PasswordCredential struct {
 
 type Book struct {
 	ID         int64      `json:"id"`
+	OwnerID    int64      `json:"owner_id"`
+	Public     bool       `json:"public"`
 	Title      string     `json:"title"`
 	Author     string     `json:"author,omitempty"`
 	Category   string     `json:"category"`
@@ -35,6 +48,7 @@ type Book struct {
 }
 
 type Progress struct {
+	UserID      int64     `json:"user_id"`
 	BookID      int64     `json:"book_id"`
 	Position    string    `json:"position,omitempty"`
 	Page        int       `json:"page,omitempty"`
@@ -46,4 +60,6 @@ type Progress struct {
 type BookListOptions struct {
 	Query, Category, Sort, Direction string
 	Page, Limit                      int
+	UserID                           int64
+	Admin                            bool
 }

@@ -54,6 +54,7 @@ type Server struct {
 type contextKey int
 
 const sessionKey contextKey = 1
+const userKey contextKey = 2
 
 func NewServer(dep Dependencies) (http.Handler, error) {
 	assets, err := LoadAssets()
@@ -93,6 +94,9 @@ func (s *Server) routes() http.Handler {
 		h.Post("/logout", s.logout)
 		h.Post("/logout/all", s.logoutAll)
 		h.Get("/books/{id}/read", s.readerPage)
+		h.Get("/admin/users", s.usersPage)
+		h.Post("/admin/users", s.createUser)
+		h.Post("/admin/users/{id}/password", s.resetUserPassword)
 	})
 	r.Route("/api", func(api chi.Router) {
 		api.Use(s.requireAPI)
@@ -181,7 +185,14 @@ func (s *Server) requireHTML(next http.Handler) http.Handler {
 			http.Redirect(w, r, "/login?return_to="+url.QueryEscape(target), http.StatusSeeOther)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey, session)))
+		user, err := s.dep.Repository.FindUser(r.Context(), session.UserID)
+		if err != nil || user.Disabled {
+			s.redirectLogin(w, r)
+			return
+		}
+		ctx := context.WithValue(r.Context(), sessionKey, session)
+		ctx = context.WithValue(ctx, userKey, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 func (s *Server) requireAPI(next http.Handler) http.Handler {
@@ -191,7 +202,14 @@ func (s *Server) requireAPI(next http.Handler) http.Handler {
 			s.jsonError(w, 401, "unauthenticated", "Authentication required")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey, session)))
+		user, err := s.dep.Repository.FindUser(r.Context(), session.UserID)
+		if err != nil || user.Disabled {
+			s.jsonError(w, 401, "unauthenticated", "Authentication required")
+			return
+		}
+		ctx := context.WithValue(r.Context(), sessionKey, session)
+		ctx = context.WithValue(ctx, userKey, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 func (s *Server) resolve(r *http.Request) (auth.Session, bool) {
@@ -206,6 +224,10 @@ func (s *Server) resolve(r *http.Request) (auth.Session, bool) {
 }
 func currentSession(r *http.Request) auth.Session {
 	return r.Context().Value(sessionKey).(auth.Session)
+}
+func currentUser(r *http.Request) database.User { return r.Context().Value(userKey).(database.User) }
+func (s *Server) redirectLogin(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, "/login?return_to="+url.QueryEscape(safeReturnValue(r.URL.RequestURI())), http.StatusSeeOther)
 }
 
 func (s *Server) loginPage(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +251,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	success, retry, limited, state := s.dep.Limiter.Attempt(ip, func() bool {
-		return s.dep.Auth.ComparePassword(r.FormValue("password"))
+		_, err := s.dep.Auth.Authenticate(r.Context(), strings.TrimSpace(r.FormValue("username")), r.FormValue("password"))
+		return err == nil
 	})
 	if limited {
 		s.loginFailure(w, r, "Too many attempts. Please wait before trying again.", 429, ratelimit.RetryAfter(retry))
@@ -240,7 +263,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 		s.loginFailure(w, r, "Sign-in failed", 401, 0)
 		return
 	}
-	session, err := s.dep.Auth.Create(r.Context(), r.UserAgent())
+	user, err := s.dep.Auth.Authenticate(r.Context(), strings.TrimSpace(r.FormValue("username")), r.FormValue("password"))
+	if err != nil {
+		s.loginFailure(w, r, "Sign-in failed", 401, 0)
+		return
+	}
+	session, err := s.dep.Auth.CreateForUser(r.Context(), user.ID, r.UserAgent())
 	if err != nil {
 		s.jsonError(w, 500, "internal_error", "Unexpected server failure")
 		return
@@ -280,6 +308,7 @@ type libraryView struct {
 	Flash                 []UploadResult
 	Query, Category, Sort string
 	Total, Page, Pages    int
+	User                  database.User
 	PrevURL, NextURL      string
 }
 
@@ -289,12 +318,15 @@ type bookView struct {
 	HasCover                bool
 	Percent                 float64
 	CSRF                    string
+	OwnerID                 int64
+	Public                  bool
+	CanManage               bool
 }
 
-func projectBooks(books []database.Book, csrf string) []bookView {
+func projectBooks(books []database.Book, csrf string, user database.User) []bookView {
 	out := make([]bookView, 0, len(books))
 	for _, book := range books {
-		out = append(out, bookView{ID: book.ID, Title: book.Title, Author: book.Author, Category: book.Category, HasCover: book.CoverPath != "", Percent: book.Percent, CSRF: csrf})
+		out = append(out, bookView{ID: book.ID, Title: book.Title, Author: book.Author, Category: book.Category, HasCover: book.CoverPath != "", Percent: book.Percent, CSRF: csrf, OwnerID: book.OwnerID, Public: book.Public, CanManage: user.IsAdmin() || book.OwnerID == user.ID})
 	}
 	return out
 }
@@ -314,6 +346,8 @@ func (s *Server) libraryPage(w http.ResponseWriter, r *http.Request) {
 		sortKey = "added"
 	}
 	opts := database.BookListOptions{Query: q, Category: r.URL.Query().Get("category"), Sort: sortKey, Direction: r.URL.Query().Get("direction"), Page: page, Limit: 60}
+	user := currentUser(r)
+	opts.UserID, opts.Admin = user.ID, user.IsAdmin()
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 	defer cancel()
 	books, total, err := s.dep.Repository.ListBooks(ctx, opts)
@@ -321,12 +355,12 @@ func (s *Server) libraryPage(w http.ResponseWriter, r *http.Request) {
 		s.htmlError(w, 500, "Library unavailable")
 		return
 	}
-	continued, _ := s.dep.Repository.ContinueReading(ctx)
-	categories, _ := s.dep.Repository.Categories(ctx)
+	continued, _ := s.dep.Repository.ContinueReadingForUser(ctx, user.ID, user.IsAdmin())
+	categories, _ := s.dep.Repository.CategoriesForUser(ctx, user.ID, user.IsAdmin())
 	pages := maxInt(1, (total+59)/60)
 	session := currentSession(r)
 	csrf := s.dep.Auth.CSRFToken(session)
-	view := libraryView{CSRF: csrf, Books: projectBooks(books, csrf), Continue: projectBooks(continued, csrf), Categories: categories, Flash: s.flash.Take(session.TokenHash), Query: q, Category: opts.Category, Sort: sortKey, Total: total, Page: page, Pages: pages}
+	view := libraryView{CSRF: csrf, Books: projectBooks(books, csrf, user), Continue: projectBooks(continued, csrf, user), Categories: categories, Flash: s.flash.Take(session.TokenHash), Query: q, Category: opts.Category, Sort: sortKey, Total: total, Page: page, Pages: pages, User: user}
 	if page > 1 {
 		view.PrevURL = pageURL(r, page-1)
 	}
@@ -345,7 +379,76 @@ func pageURL(r *http.Request, page int) string {
 	return "/?" + q.Encode()
 }
 func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
-	s.render(w, "settings", map[string]any{"CSRF": s.dep.Auth.CSRFToken(currentSession(r))})
+	s.render(w, "settings", map[string]any{"CSRF": s.dep.Auth.CSRFToken(currentSession(r)), "User": currentUser(r)})
+}
+
+func (s *Server) requireAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if !currentUser(r).IsAdmin() {
+		s.htmlError(w, http.StatusForbidden, "Administrator access required")
+		return false
+	}
+	return true
+}
+func validUsername(v string) bool {
+	if utf8.RuneCountInString(v) < 1 || utf8.RuneCountInString(v) > 64 {
+		return false
+	}
+	for _, r := range v {
+		if !(r == '-' || r == '_' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9') {
+			return false
+		}
+	}
+	return true
+}
+func passwordDigest(password string) string {
+	digest := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(digest[:])
+}
+func (s *Server) usersPage(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) {
+		return
+	}
+	users, err := s.dep.Repository.ListUsers(r.Context())
+	if err != nil {
+		s.htmlError(w, 500, "Users unavailable")
+		return
+	}
+	s.render(w, "users", map[string]any{"CSRF": s.dep.Auth.CSRFToken(currentSession(r)), "Users": users, "User": currentUser(r)})
+}
+func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) || !s.validFormCSRF(w, r) {
+		return
+	}
+	username, password := strings.TrimSpace(r.FormValue("username")), r.FormValue("password")
+	if !validUsername(username) || utf8.RuneCountInString(password) < auth.MinPasswordLength {
+		s.htmlError(w, 400, "Username or password is invalid")
+		return
+	}
+	if _, err := s.dep.Repository.CreateUser(r.Context(), username, passwordDigest(password), "user", time.Now().UTC()); err != nil {
+		s.htmlError(w, 400, "Username is already in use")
+		return
+	}
+	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
+}
+func (s *Server) resetUserPassword(w http.ResponseWriter, r *http.Request) {
+	if !s.requireAdmin(w, r) || !s.validFormCSRF(w, r) {
+		return
+	}
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil || id < 1 || utf8.RuneCountInString(r.FormValue("password")) < auth.MinPasswordLength {
+		s.htmlError(w, 400, "Invalid password or user")
+		return
+	}
+	if _, err = s.dep.Repository.FindUser(r.Context(), id); database.IsNotFound(err) {
+		s.htmlError(w, 404, "User not found")
+		return
+	}
+	if err = s.dep.Repository.SetUserPassword(r.Context(), id, passwordDigest(r.FormValue("password"))); err != nil {
+		s.htmlError(w, 500, "Password could not be changed")
+		return
+	}
+	_ = s.dep.Repository.DeleteUserSessions(r.Context(), id)
+	http.Redirect(w, r, "/admin/users", http.StatusSeeOther)
 }
 func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 	if !s.validFormCSRF(w, r) {
@@ -356,7 +459,7 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request) {
 		s.htmlError(w, http.StatusBadRequest, "New passwords do not match")
 		return
 	}
-	if err := s.dep.Auth.ChangePassword(r.Context(), current, next); err != nil {
+	if err := s.dep.Auth.ChangeUserPassword(r.Context(), currentUser(r).ID, current, next); err != nil {
 		switch {
 		case errors.Is(err, auth.ErrInvalidCurrentPassword):
 			s.htmlError(w, http.StatusBadRequest, "Current password is incorrect")
@@ -430,6 +533,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 	staged := map[int]stagedResult{}
 	covers := map[int]string{}
 	category := ""
+	public := true
 	nextIndex := 0
 	cleanup := func() {
 		for _, item := range staged {
@@ -474,6 +578,15 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 				s.jsonError(w, 400, "invalid_field", "Category is too large")
 				return
 			}
+			continue
+		}
+		if name == "private" {
+			value, e := readText(part)
+			if e != nil {
+				s.jsonError(w, 400, "invalid_field", "Invalid visibility field")
+				return
+			}
+			public = value != "true" && value != "1"
 			continue
 		}
 		kind, index, ok := parsePartName(name)
@@ -532,7 +645,7 @@ func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
 			results = append(results, UploadResult{Index: index, Filename: filename, Status: "error", Error: uploadError(item.err)})
 			continue
 		}
-		book, createErr := s.dep.Library.Create(r.Context(), item.book, covers[index], category)
+		book, createErr := s.dep.Library.CreateForUser(r.Context(), currentUser(r).ID, public, item.book, covers[index], category)
 		item.book.Path = ""
 		staged[index] = item
 		if createErr != nil {
@@ -589,12 +702,21 @@ func (s *Server) mutateBook(w http.ResponseWriter, r *http.Request) {
 	}
 	method := r.Method
 	title, author, category, token, confirm := "", "", "", "", ""
+	public := true
+	visibilitySet := false
 	if strings.Contains(r.Header.Get("Content-Type"), "application/json") {
-		var body struct{ Title, Author, Category, CSRFToken string }
+		var body struct {
+			Title, Author, Category, CSRFToken string
+			Public                             *bool `json:"public"`
+		}
 		if err := decodeJSON(w, r, &body); err != nil {
 			return
 		}
 		title, author, category, token = body.Title, body.Author, body.Category, body.CSRFToken
+		if body.Public != nil {
+			public = *body.Public
+			visibilitySet = true
+		}
 	} else {
 		r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 		if err := r.ParseForm(); err != nil {
@@ -602,6 +724,8 @@ func (s *Server) mutateBook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		title, author, category, token = r.FormValue("title"), r.FormValue("author"), r.FormValue("category"), r.FormValue("csrf_token")
+		public = r.FormValue("public") == "true"
+		visibilitySet = true
 		confirm = r.FormValue("confirm")
 		if r.Method == http.MethodPost {
 			switch r.FormValue("_method") {
@@ -622,9 +746,25 @@ func (s *Server) mutateBook(w http.ResponseWriter, r *http.Request) {
 		s.jsonError(w, 403, "csrf_failed", "Request could not be verified")
 		return
 	}
+	book, findErr := s.dep.Repository.FindBookForUser(r.Context(), id, currentUser(r).ID, currentUser(r).IsAdmin())
+	if database.IsNotFound(findErr) {
+		s.jsonError(w, 404, "book_not_found", "Book not found")
+		return
+	}
+	if findErr != nil {
+		s.jsonError(w, 500, "internal_error", "Unexpected server failure")
+		return
+	}
+	if !currentUser(r).IsAdmin() && book.OwnerID != currentUser(r).ID {
+		s.jsonError(w, 403, "forbidden", "You cannot change this book")
+		return
+	}
 	var err error
 	if method == http.MethodPatch {
 		err = s.dep.Library.Update(r.Context(), id, title, author, category)
+		if err == nil && visibilitySet {
+			err = s.dep.Library.UpdateVisibility(r.Context(), id, public)
+		}
 	} else if method == http.MethodDelete {
 		if r.Method == http.MethodPost && confirm != "yes" {
 			s.jsonError(w, 400, "confirmation_required", "Deletion must be confirmed")
@@ -655,7 +795,7 @@ func (s *Server) readerPage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	book, err := s.dep.Repository.FindBook(r.Context(), id)
+	book, err := s.dep.Repository.FindBookForUser(r.Context(), id, currentUser(r).ID, currentUser(r).IsAdmin())
 	if database.IsNotFound(err) {
 		s.htmlError(w, 404, "Book not found")
 		return
@@ -680,7 +820,7 @@ func (s *Server) serveBookData(w http.ResponseWriter, r *http.Request, cover boo
 	if !ok {
 		return
 	}
-	book, err := s.dep.Repository.FindBook(r.Context(), id)
+	book, err := s.dep.Repository.FindBookForUser(r.Context(), id, currentUser(r).ID, currentUser(r).IsAdmin())
 	if database.IsNotFound(err) {
 		s.jsonError(w, 404, "book_not_found", "Book not found")
 		return
@@ -740,7 +880,11 @@ func (s *Server) getProgress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	p, err := s.dep.Progress.Get(r.Context(), id)
+	if _, err := s.dep.Repository.FindBookForUser(r.Context(), id, currentUser(r).ID, currentUser(r).IsAdmin()); database.IsNotFound(err) {
+		s.jsonError(w, 404, "book_not_found", "Book not found")
+		return
+	}
+	p, err := s.dep.Progress.GetForUser(r.Context(), currentUser(r).ID, id)
 	if database.IsNotFound(err) {
 		s.jsonError(w, 404, "book_not_found", "Book not found")
 		return
@@ -756,6 +900,10 @@ func (s *Server) saveProgress(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if _, err := s.dep.Repository.FindBookForUser(r.Context(), id, currentUser(r).ID, currentUser(r).IsAdmin()); database.IsNotFound(err) {
+		s.jsonError(w, 404, "book_not_found", "Book not found")
+		return
+	}
 	var in progress.SaveRequest
 	if err := decodeJSON(w, r, &in); err != nil {
 		return
@@ -768,7 +916,7 @@ func (s *Server) saveProgress(w http.ResponseWriter, r *http.Request) {
 		s.jsonError(w, 403, "csrf_failed", "Request could not be verified")
 		return
 	}
-	p, err := s.dep.Progress.Save(r.Context(), id, in)
+	p, err := s.dep.Progress.SaveForUser(r.Context(), currentUser(r).ID, id, in)
 	if database.IsNotFound(err) {
 		s.jsonError(w, 404, "book_not_found", "Book not found")
 		return

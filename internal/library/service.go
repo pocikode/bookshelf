@@ -34,6 +34,9 @@ type repository interface {
 	UpdateBook(context.Context, int64, string, string, string) error
 	DeleteBookTx(context.Context, int64) error
 }
+type scopedHashRepository interface {
+	FindBookByHashForUser(context.Context, string, int64, bool) (database.Book, error)
+}
 
 type Service struct {
 	repo     repository
@@ -133,8 +136,18 @@ func (s *Service) StageCover(src io.Reader) (string, error) {
 func (s *Service) Path(rel string) (string, error) { return s.absolute(rel) }
 
 func (s *Service) Create(ctx context.Context, stage StagedBook, coverTemp, category string) (database.Book, error) {
+	return s.CreateForUser(ctx, 1, true, stage, coverTemp, category)
+}
+
+func (s *Service) CreateForUser(ctx context.Context, ownerID int64, public bool, stage StagedBook, coverTemp, category string) (database.Book, error) {
 	defer stage.Cleanup()
-	if existing, err := s.repo.FindBookByHash(ctx, stage.Hash); err == nil {
+	findDuplicate := s.repo.FindBookByHash
+	if scoped, ok := s.repo.(scopedHashRepository); ok {
+		findDuplicate = func(ctx context.Context, hash string) (database.Book, error) {
+			return scoped.FindBookByHashForUser(ctx, hash, ownerID, false)
+		}
+	}
+	if existing, err := findDuplicate(ctx, stage.Hash); err == nil {
 		return database.Book{}, &DuplicateError{existing}
 	} else if !database.IsNotFound(err) {
 		return database.Book{}, err
@@ -201,9 +214,15 @@ func (s *Service) Create(ctx context.Context, stage StagedBook, coverTemp, categ
 			coverCreated = false
 		}
 	}
-	b := database.Book{Title: meta.Title, Author: meta.Author, Category: category, Format: stage.Format, FileHash: stage.Hash, FilePath: filepath.ToSlash(relBook), FileSize: stage.Size, CoverPath: filepath.ToSlash(relCover), PageCount: pageCount, Language: meta.Language, Publisher: meta.Publisher, CreatedAt: s.now().UTC()}
+	b := database.Book{OwnerID: ownerID, Public: public, Title: meta.Title, Author: meta.Author, Category: category, Format: stage.Format, FileHash: stage.Hash, FilePath: filepath.ToSlash(relBook), FileSize: stage.Size, CoverPath: filepath.ToSlash(relCover), PageCount: pageCount, Language: meta.Language, Publisher: meta.Publisher, CreatedAt: s.now().UTC()}
 	if err := s.repo.InsertBook(ctx, &b); err != nil {
-		if existing, findErr := s.repo.FindBookByHash(ctx, stage.Hash); findErr == nil {
+		findDuplicate := s.repo.FindBookByHash
+		if scoped, ok := s.repo.(scopedHashRepository); ok {
+			findDuplicate = func(ctx context.Context, hash string) (database.Book, error) {
+				return scoped.FindBookByHashForUser(ctx, hash, ownerID, false)
+			}
+		}
+		if existing, findErr := findDuplicate(ctx, stage.Hash); findErr == nil {
 			return database.Book{}, &DuplicateError{existing}
 		}
 		if bookCreated {
@@ -229,6 +248,16 @@ func (s *Service) Update(ctx context.Context, id int64, title, author, category 
 		return errors.New("metadata is too long")
 	}
 	return s.repo.UpdateBook(ctx, id, title, author, category)
+}
+
+func (s *Service) UpdateVisibility(ctx context.Context, id int64, public bool) error {
+	repo, ok := s.repo.(interface {
+		UpdateBookVisibility(context.Context, int64, bool) error
+	})
+	if !ok {
+		return errors.New("book visibility update is unavailable")
+	}
+	return repo.UpdateBookVisibility(ctx, id, public)
 }
 
 func identify(path, ext string) (string, error) {

@@ -20,7 +20,7 @@
       </a>
       <nav class="site-nav" aria-label="Primary navigation">
         <a class="nav-link nav-link-active" href="/">Library</a>
-        <a class="nav-link" href="/settings">Settings</a>
+        <a class="nav-link" href="/settings">Settings</a>{{if .User.IsAdmin}}<a class="nav-link" href="/admin/users">Users</a>{{end}}
       </nav>
     </div>
   </header>
@@ -79,7 +79,8 @@
             <p id="upload-file-summary" class="upload-file-summary mt-3" aria-live="polite">No books selected yet</p>
           </div>
           <label class="form-label" for="category">Category <span>(optional)</span></label>
-          <input class="field" id="category" name="category" maxlength="100" placeholder="Uncategorized">
+           <input class="field" id="category" name="category" maxlength="100" placeholder="Uncategorized">
+            <label class="visibility-control"><input class="visibility-input" type="checkbox" name="private" value="true"><span class="visibility-box" aria-hidden="true"></span><span><strong>Private book</strong><small>Only you and admins can see it.</small></span></label>
           <p id="upload-status" class="upload-status" aria-live="polite"></p>
           <div class="dialog-actions">
             <button class="button-quiet" type="button" data-dialog-close>Cancel</button>
@@ -134,9 +135,9 @@
     <div class="book-card-body"><div class="book-card-heading"><h3>{{.Title}}</h3>{{if .Category}}<span class="book-tag">{{.Category}}</span>{{end}}</div><p class="book-author">{{if .Author}}{{.Author}}{{else}}Unknown author{{end}}</p><div class="progress-meta"><span>{{percent .Percent}}% read</span><span class="progress-track"><span style="width:{{percent .Percent}}%"></span></span></div></div>
   </a>
   <details class="book-actions">
-    <summary>Edit or delete</summary>
-    <form method="post" action="/api/books/{{.ID}}"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="_method" value="PATCH"><label>Title<input class="field" name="title" maxlength="512" required value="{{.Title}}"></label><label>Author<input class="field" name="author" maxlength="512" value="{{.Author}}"></label><label>Category<input class="field" name="category" maxlength="100" value="{{.Category}}"></label><button class="button-quiet" type="submit">Save metadata</button></form>
-    <form class="delete-form" method="post" action="/api/books/{{.ID}}"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="_method" value="DELETE"><label><input type="checkbox" name="confirm" value="yes" required><span>I understand this permanently removes the book and its reading position.</span></label><button class="button-danger" type="submit">Delete permanently</button></form>
+     <summary>{{if .CanManage}}Edit or delete{{else}}Book details{{end}}</summary>
+     {{if .CanManage}}<form method="post" action="/api/books/{{.ID}}"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="_method" value="PATCH"><label>Title<input class="field" name="title" maxlength="512" required value="{{.Title}}"></label><label>Author<input class="field" name="author" maxlength="512" value="{{.Author}}"></label><label>Category<input class="field" name="category" maxlength="100" value="{{.Category}}"></label><label class="visibility-control"><input class="visibility-input" type="checkbox" name="public" value="true" {{if .Public}}checked{{end}}><span class="visibility-box" aria-hidden="true"></span><span><strong>Visible to other users</strong><small>Uncheck to make this book private.</small></span></label><button class="button-quiet" type="submit">Save metadata</button></form>
+     <form class="delete-form" method="post" action="/api/books/{{.ID}}"><input type="hidden" name="csrf_token" value="{{.CSRF}}"><input type="hidden" name="_method" value="DELETE"><label><input type="checkbox" name="confirm" value="yes" required><span>I understand this permanently removes the book and its reading position.</span></label><button class="button-danger" type="submit">Delete permanently</button></form>{{end}}
   </details>
 </article>
 {{end}}
