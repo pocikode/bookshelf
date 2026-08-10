@@ -188,6 +188,10 @@ function installControls() {
   document.querySelector("#line-height").addEventListener("input", event => updatePreference("lineHeight", Number(event.currentTarget.value), applyEPUBStyles));
   document.querySelector("#text-width").addEventListener("input", event => updatePreference("textWidth", Number(event.currentTarget.value), applyEPUBStyles));
   document.querySelector("#pdf-zoom").addEventListener("input", event => updatePreference("pdfZoom", Number(event.currentTarget.value) / 100, () => renderPDFPage()));
+  document.querySelector("#zoom-out").addEventListener("click", () => adjustZoom(-1));
+  document.querySelector("#zoom-in").addEventListener("click", () => adjustZoom(1));
+  document.querySelector("#pdf-zoom-out").addEventListener("click", () => adjustZoom(-1));
+  document.querySelector("#pdf-zoom-in").addEventListener("click", () => adjustZoom(1));
   document.querySelector("#reader-flow").addEventListener("change", event => setEPUBFlow(event.currentTarget.value));
   document.querySelector("#reset-settings").addEventListener("click", resetPreferences);
   document.querySelector("#theme").addEventListener("click", toggleTheme);
@@ -462,6 +466,15 @@ function updatePreference(key, value, apply) {
 function adjustFont(delta) {
   const value = Math.min(Math.max(state.preferences.fontSize + delta, 75), 180);
   updatePreference("fontSize", value, applyEPUBStyles);
+}
+
+function adjustZoom(direction) {
+  if (format === "epub") {
+    adjustFont(direction * 5);
+    return;
+  }
+  const value = Math.min(Math.max(state.preferences.pdfZoom + direction * 0.05, 0.5), 3);
+  updatePreference("pdfZoom", value, () => renderPDFPage());
 }
 
 function resetPreferences() {

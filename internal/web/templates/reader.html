@@ -57,7 +57,11 @@
       <div class="reader-settings-group">
         <div class="reader-setting-row">
           <label for="font-size">Text size</label>
-          <output id="font-size-value" for="font-size">100%</output>
+          <div class="reader-zoom-controls">
+            <button id="zoom-out" class="reader-zoom-button" type="button" aria-label="Zoom out" title="Zoom out">-</button>
+            <output id="font-size-value" for="font-size">100%</output>
+            <button id="zoom-in" class="reader-zoom-button" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+          </div>
         </div>
         <input id="font-size" type="range" min="75" max="180" step="5" value="100">
       </div>
@@ -85,7 +89,11 @@
       <div class="reader-settings-group reader-pdf-setting">
         <div class="reader-setting-row">
           <label for="pdf-zoom">PDF zoom</label>
-          <output id="pdf-zoom-value" for="pdf-zoom">125%</output>
+          <div class="reader-zoom-controls">
+            <button id="pdf-zoom-out" class="reader-zoom-button" type="button" aria-label="Zoom out" title="Zoom out">-</button>
+            <output id="pdf-zoom-value" for="pdf-zoom">125%</output>
+            <button id="pdf-zoom-in" class="reader-zoom-button" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+          </div>
         </div>
         <input id="pdf-zoom" type="range" min="50" max="300" step="5" value="125">
       </div>
