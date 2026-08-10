@@ -287,7 +287,11 @@ func (s *Server) loginFailure(w http.ResponseWriter, r *http.Request, message st
 	if r.Form != nil {
 		returnTo = r.Form.Get("return_to")
 	}
-	s.render(w, "login", map[string]any{"Error": message, "ReturnTo": safeReturnValue(returnTo)})
+	s.render(w, "login", map[string]any{
+		"Error":    message,
+		"ReturnTo": safeReturnValue(returnTo),
+		"Username": r.FormValue("username"),
+	})
 }
 func safeReturnValue(v string) string {
 	if safeReturn(v) {

@@ -93,6 +93,21 @@ func (a *integrationApp) request(method, path string, body io.Reader, authn bool
 	a.handler.ServeHTTP(rec, req)
 	return rec
 }
+func TestLoginFailureKeepsUsername(t *testing.T) {
+	app := newIntegrationApp(t)
+	defer app.dbClose()
+
+	rec := app.request("POST", "/login", strings.NewReader(url.Values{
+		"username": {"admin"},
+		"password": {"wrong password"},
+	}.Encode()), false)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("login status=%d", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), `name="username" value="admin"`) {
+		t.Fatalf("username was not preserved: %s", rec.Body.String())
+	}
+}
 func TestAuthenticatedFileRangesAndConditionals(t *testing.T) {
 	app := newIntegrationApp(t)
 	defer app.dbClose()
