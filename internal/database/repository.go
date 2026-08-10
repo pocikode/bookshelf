@@ -260,7 +260,7 @@ func (r *Repository) ContinueReadingForUser(ctx context.Context, userID int64, a
 		visibility = "1=1"
 		args = nil
 	}
-	rows, err := r.DB.QueryContext(ctx, `SELECT `+bookColumns+` FROM books b JOIN reading_progress p ON p.book_id=b.id AND p.user_id=? WHERE p.percent>0 AND p.percent<0.995 AND `+visibility+` ORDER BY p.updated_at DESC LIMIT 6`, append([]any{userID}, args...)...)
+	rows, err := r.DB.QueryContext(ctx, `SELECT `+bookColumns+` FROM books b JOIN reading_progress p ON p.book_id=b.id AND p.user_id=? WHERE p.percent>0 AND p.percent<0.995 AND `+visibility+` ORDER BY p.updated_at DESC LIMIT 3`, append([]any{userID}, args...)...)
 	if err != nil {
 		return nil, err
 	}
