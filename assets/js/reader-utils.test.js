@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { boundedNumber, deviceLabel, normalizePDFPage, tocKey } from "./reader-utils.js";
+import { boundedNumber, columnCount, deviceLabel, normalizePDFPage, tocKey } from "./reader-utils.js";
 
 describe("boundedNumber", () => {
   test("accepts bounds and rejects invalid values", () => {
@@ -7,6 +7,26 @@ describe("boundedNumber", () => {
     expect(boundedNumber("1", 9, 1, 3)).toBe(1);
     expect(boundedNumber("3", 9, 1, 3)).toBe(3);
     for (const raw of ["nope", Infinity, 0, 4]) expect(boundedNumber(raw, 9, 1, 3)).toBe(9);
+  });
+});
+
+describe("columnCount", () => {
+  test("treats the preference as a ceiling, not a target", () => {
+    expect(columnCount(2000, 1)).toBe(1);
+    expect(columnCount(2000, 2)).toBe(2);
+    expect(columnCount(2000, 4)).toBe(4);
+  });
+
+  test("drops columns the stage is too narrow to hold", () => {
+    expect(columnCount(799, 2)).toBe(1);
+    expect(columnCount(800, 2)).toBe(2);
+    expect(columnCount(1000, 4)).toBe(2);
+    expect(columnCount(0, 4)).toBe(1);
+  });
+
+  test("falls back to a single column for unusable maximums", () => {
+    expect(columnCount(2000, "nope")).toBe(1);
+    expect(columnCount(2000, 9)).toBe(1);
   });
 });
 

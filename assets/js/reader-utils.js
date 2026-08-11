@@ -3,6 +3,14 @@ export function boundedNumber(raw, fallback, min, max) {
   return Number.isFinite(value) && value >= min && value <= max ? value : fallback;
 }
 
+/* readest's "maximum number of columns": the pick is a ceiling, and the stage
+   only reaches it while every column stays wide enough to read. */
+export function columnCount(width, maxColumns, minColumnWidth = 400) {
+  const cap = boundedNumber(maxColumns, 1, 1, 4);
+  const fits = Math.floor((Number(width) || 0) / minColumnWidth);
+  return Math.min(cap, Math.max(fits, 1));
+}
+
 export function normalizePDFPage(page, numPages, spread = false) {
   const value = Math.min(Math.max(Number(page) || 1, 1), numPages || Number.MAX_SAFE_INTEGER);
   return !spread || value === 1 ? value : 2 + Math.floor((value - 2) / 2) * 2;

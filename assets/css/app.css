@@ -415,6 +415,9 @@
   .reader-list-action:hover { background: var(--surface-muted); color: var(--ink); }
   .reader-app[data-format="epub"] .reader-pdf-setting { display: none; }
   .reader-app[data-format="pdf"] .reader-epub-setting { display: none; }
+  /* Columns are a property of a paged surface, so the picker steps aside while
+     the book scrolls. */
+  .reader-app[data-flow="scrolled"] .reader-columns { display: none; }
 
   #reader-loading { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; align-content: center; gap: .9rem; background: var(--canvas); color: var(--muted); font-family: var(--font-serif); font-size: 1.25rem; text-align: center; }
   .reader-loading-mark { position: relative; width: 2.75rem; height: .2rem; overflow: hidden; background: var(--line-strong); }

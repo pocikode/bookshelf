@@ -1,6 +1,6 @@
 import ePub from "epubjs";
 import * as pdfjsLib from "pdfjs-dist";
-import { boundedNumber, deviceLabel as formatDeviceLabel, normalizePDFPage as normalizePage, tocKey } from "./reader-utils.js";
+import { boundedNumber, columnCount, deviceLabel as formatDeviceLabel, normalizePDFPage as normalizePage, tocKey } from "./reader-utils.js";
 
 const app = document.querySelector("#reader-app");
 const id = Number(app?.dataset.bookId);
@@ -10,7 +10,7 @@ const endpoint = `/api/books/${id}/progress`;
 const pdfTones = ["paper", "sepia", "light"];
 const preferenceKey = `bookshelf:v2:reader:${id}`;
 const layoutKey = "bookshelf:v1:reader-layout";
-const defaults = { fontSize: 100, lineHeight: 1.5, textWidth: 52, flow: "paginated", pdfZoom: 1.25, pdfTone: "paper" };
+const defaults = { fontSize: 100, lineHeight: 1.5, textWidth: 52, flow: "paginated", columns: 2, pdfZoom: 1.25, pdfTone: "paper" };
 const hoverCapable = window.matchMedia("(hover: hover)").matches;
 const state = {
   phase: "booting",
@@ -68,6 +68,7 @@ async function bootEPUB(saved) {
   const rendition = book.renderTo("epub-viewer", { width: "100%", height: "100%", spread: "auto" });
   state.book = book;
   state.rendition = rendition;
+  installEPUBColumns(rendition);
   loadEPUBLocations(book);
   rendition.flow(state.preferences.flow === "scrolled" ? "scrolled-doc" : "paginated");
   applyEPUBStyles();
@@ -259,6 +260,7 @@ function installControls() {
     input.addEventListener("input", event => syncRange(event.currentTarget));
   }
   for (const button of document.querySelectorAll("[data-flow]")) button.addEventListener("click", () => setEPUBFlow(button.dataset.flow));
+  for (const button of document.querySelectorAll("[data-columns]")) button.addEventListener("click", () => setColumns(Number(button.dataset.columns)));
   for (const button of document.querySelectorAll("[data-theme-mode]")) button.addEventListener("click", () => setTheme(button.dataset.themeMode === "dark"));
   for (const button of document.querySelectorAll("[data-pdf-tone]")) button.addEventListener("click", () => setPDFTone(button.dataset.pdfTone));
 
@@ -624,7 +626,7 @@ function jumpPlaceholder() {
 }
 
 function pdfUsesSpread() {
-  return window.matchMedia("(min-width: 701px)").matches;
+  return state.preferences.columns >= 2 && window.matchMedia("(min-width: 701px)").matches;
 }
 
 /* ---------- table of contents ---------- */
@@ -870,12 +872,63 @@ async function setEPUBFlow(flow) {
   state.preferences.flow = flow;
   savePreferences();
   updateSettingsUI();
+  await applyReadingLayout();
+}
+
+async function setColumns(value) {
+  state.preferences.columns = boundedNumber(value, defaults.columns, 1, 4);
+  savePreferences();
+  updateSettingsUI();
+  await applyReadingLayout();
+}
+
+/* Flow and column count both change how a page is measured, so they share one
+   re-layout: hand the rendition its new shape, then land back on the current
+   page. A PDF has no flow, only the one-or-two sheet spread. */
+async function applyReadingLayout() {
+  if (format === "pdf") {
+    if (!state.pdf) return;
+    await renderPDFPage();
+    observe({ page: state.pdfPage });
+    return;
+  }
+  if (!state.rendition) return;
   try {
-    state.rendition.flow(flow === "scrolled" ? "scrolled-doc" : "paginated");
+    state.rendition.flow(state.preferences.flow === "scrolled" ? "scrolled-doc" : "paginated");
     await state.rendition.display(state.currentLocation?.start?.cfi || undefined);
   } catch (error) {
-    console.warn("Could not change reading mode", error);
+    console.warn("Could not change the reading layout", error);
   }
+}
+
+/* epub.js counts columns as a "spread" — one or two, never more. Its layout
+   arithmetic is redone here for the column count the reader asked for, the way
+   readest's maximum column count works. The rendition builds a fresh Layout
+   once the book's metadata lands, so the patch rides on the factory rather
+   than on the instance that exists now. */
+function installEPUBColumns(rendition) {
+  const layoutFor = rendition.layout.bind(rendition);
+  rendition.layout = settings => {
+    const layout = layoutFor(settings);
+    if (settings && layout) patchColumnLayout(layout);
+    return layout;
+  };
+  if (rendition._layout) patchColumnLayout(rendition._layout);
+}
+
+function patchColumnLayout(layout) {
+  const calculate = layout.calculate.bind(layout);
+  layout.calculate = (width, height, gap) => {
+    calculate(width, height, gap);
+    if (layout.name !== "reflowable" || layout.flow() !== "paginated") return;
+    const divisor = columnCount(layout.width, state.preferences.columns);
+    if (divisor === layout.divisor) return;
+    const columnWidth = divisor > 1 ? layout.width / divisor - layout.gap : layout.width;
+    const pageWidth = divisor > 1 ? columnWidth + layout.gap : layout.width;
+    const spreadWidth = columnWidth * divisor + layout.gap;
+    Object.assign(layout, { columnWidth, pageWidth, spreadWidth, divisor });
+    layout.update({ columnWidth, pageWidth, spreadWidth, divisor });
+  };
 }
 
 function updatePreference(key, value, apply) {
@@ -903,10 +956,8 @@ function resetPreferences() {
   savePreferences();
   updateSettingsUI();
   applyEPUBStyles();
-  if (format === "pdf") {
-    setPDFTone(defaults.pdfTone);
-    renderPDFPage().catch(error => console.warn("Could not reset PDF settings", error));
-  }
+  if (format === "pdf") setPDFTone(defaults.pdfTone);
+  applyReadingLayout().catch(error => console.warn("Could not reset reader settings", error));
 }
 
 function updateSettingsUI() {
@@ -916,7 +967,10 @@ function updateSettingsUI() {
   setValue("#text-width", preferences.textWidth);
   setValue("#pdf-zoom", Math.round(preferences.pdfZoom * 100));
   for (const button of document.querySelectorAll("[data-flow]")) button.classList.toggle("is-active", button.dataset.flow === preferences.flow);
+  for (const button of document.querySelectorAll("[data-columns]")) button.classList.toggle("is-active", Number(button.dataset.columns) === preferences.columns);
   for (const button of document.querySelectorAll("[data-pdf-tone]")) button.classList.toggle("is-active", button.dataset.pdfTone === preferences.pdfTone);
+  /* The column picker only means something on a paged surface. */
+  if (format === "epub") app.dataset.flow = preferences.flow;
   syncRanges();
 }
 
@@ -1075,6 +1129,7 @@ function loadPreferences() {
     lineHeight: boundedNumber(stored.lineHeight, defaults.lineHeight, 1.2, 2),
     textWidth: boundedNumber(stored.textWidth, defaults.textWidth, 32, 80),
     flow: ["paginated", "scrolled"].includes(stored.flow) ? stored.flow : defaults.flow,
+    columns: boundedNumber(stored.columns, defaults.columns, 1, 4),
     pdfZoom: boundedNumber(stored.pdfZoom, defaults.pdfZoom, 0.5, 3),
     pdfTone: pdfTones.includes(stored.pdfTone) ? stored.pdfTone : defaults.pdfTone,
   };

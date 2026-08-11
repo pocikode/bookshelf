@@ -36,6 +36,10 @@
     <symbol id="i-margin" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 8h8v8H8z"/></symbol>
     <symbol id="i-scroll" viewBox="0 0 24 24"><rect x="6" y="3.5" width="12" height="17" rx="2"/><path d="M12 8v8M12 16l-2.2-2.2M12 16l2.2-2.2"/></symbol>
     <symbol id="i-pages" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="7" height="15" rx="1.5"/><rect x="13.5" y="4.5" width="7" height="15" rx="1.5"/></symbol>
+    <symbol id="i-columns-1" viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/></symbol>
+    <symbol id="i-columns-2" viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/><path d="M12 4.5v15"/></symbol>
+    <symbol id="i-columns-3" viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/><path d="M9.5 4.5v15M14.5 4.5v15"/></symbol>
+    <symbol id="i-columns-4" viewBox="0 0 24 24"><rect x="4.5" y="4.5" width="15" height="15" rx="1.5"/><path d="M8.25 4.5v15M12 4.5v15M15.75 4.5v15"/></symbol>
   </svg>
 
   <main id="reader-app" class="reader-app is-loading" data-book-id="{{.Book.ID}}" data-format="{{.Book.Format}}" data-file-hash="{{.Book.FileHash}}" data-page-count="{{.Book.PageCount}}" data-file-url="/api/books/{{.Book.ID}}/file" data-worker-url="{{asset "pdf.worker.js"}}">
@@ -187,6 +191,12 @@
           <div class="reader-choices reader-epub-setting" role="group" aria-label="Reading mode">
             <button class="reader-choice" type="button" data-flow="paginated"><svg class="icon"><use href="#i-pages"></use></svg>Paginated</button>
             <button class="reader-choice" type="button" data-flow="scrolled"><svg class="icon"><use href="#i-scroll"></use></svg>Scrolling</button>
+          </div>
+          <div class="reader-choices reader-columns" role="group" aria-label="Maximum number of columns">
+            <button class="reader-choice" type="button" data-columns="1" title="One column" aria-label="One column"><svg class="icon"><use href="#i-columns-1"></use></svg>1</button>
+            <button class="reader-choice" type="button" data-columns="2" title="Two columns" aria-label="Two columns"><svg class="icon"><use href="#i-columns-2"></use></svg>2</button>
+            <button class="reader-choice reader-epub-setting" type="button" data-columns="3" title="Three columns" aria-label="Three columns"><svg class="icon"><use href="#i-columns-3"></use></svg>3</button>
+            <button class="reader-choice reader-epub-setting" type="button" data-columns="4" title="Four columns" aria-label="Four columns"><svg class="icon"><use href="#i-columns-4"></use></svg>4</button>
           </div>
           <button id="reset-settings" class="reader-list-action" type="button">Reset to defaults</button>
         </section>
