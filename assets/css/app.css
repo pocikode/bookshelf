@@ -311,8 +311,13 @@
   #reader-app[data-format="pdf"] #pdf-page { background: #f3efe6; }
   #reader-app[data-format="pdf"][data-pdf-tone="sepia"] #pdf-page { background: #e9dec8; }
   #reader-app[data-format="pdf"][data-pdf-tone="light"] #pdf-page { background: #ffffff; }
-  #pdf-page { display: flex; width: 100%; max-width: 100%; min-height: 100%; flex: 0 0 auto; flex-direction: column; justify-content: center; margin-inline: auto; }
-  #pdf-spread { display: flex; width: fit-content; align-items: center; justify-content: center; margin-inline: auto; }
+  /* max-content keeps a zoomed-in sheet reachable: the stage centres its
+     children, and a child narrower than its own content would spill past both
+     edges with only the right-hand half scrollable. */
+  #pdf-page { display: flex; width: max-content; min-width: 100%; min-height: 100%; flex: 0 0 auto; flex-direction: column; justify-content: center; margin-inline: auto; }
+  #pdf-spread { display: flex; width: fit-content; align-items: center; justify-content: center; margin-inline: auto; transform-origin: 50% 0; }
+  /* Own the pinch so it zooms the sheet rather than the whole reader. */
+  #reader-app[data-format="pdf"] .reader-stage { touch-action: pan-x pan-y; }
   #pdf-spread .pdf-sheet { position: relative; width: fit-content; min-width: 0; }
   #pdf-spread canvas { display: block; height: auto; margin: 0 auto; }
   .pdf-text-layer { position: absolute; inset: 0; overflow: hidden; line-height: 1; user-select: text; }
@@ -502,9 +507,6 @@
 }
 
 @media (max-width: 700px) {
-  #pdf-spread { width: 100%; max-width: 100%; }
-  #pdf-spread .pdf-sheet { max-width: 100%; }
-  #pdf-spread canvas { max-width: 100%; }
   #pdf-spread .pdf-sheet:not(:first-child) { display: none; }
 }
 

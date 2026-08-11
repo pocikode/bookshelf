@@ -27,6 +27,7 @@ const state = {
   pdfTextLayers: [],
   pdfPage: 1,
   pdfRenderToken: 0,
+  pinchedUntil: 0,
   locations: null,
   currentLocation: null,
   tocItems: [],
@@ -169,14 +170,43 @@ async function renderPDFPage() {
   const pages = await Promise.all(pageNumbers.map(pageNumber => state.pdf.getPage(pageNumber)));
   if (token !== state.pdfRenderToken) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  await Promise.all(pages.map((page, index) => renderPDFSheet(page, sheets[index], dpr, token)));
+  /* Measured off the spread rather than the pages on screen so a lone last
+     sheet is not suddenly drawn at twice the width of the spread before it. */
+  const scale = pdfFitScale(pages[0], spreadMode ? 2 : 1) * state.preferences.pdfZoom;
+  spread.style.transform = "";
+  await Promise.all(pages.map((page, index) => renderPDFSheet(page, sheets[index], dpr, scale, token)));
   if (token !== state.pdfRenderToken) return;
   markActivePDFTOC();
   updatePDFProgress();
 }
 
-async function renderPDFSheet(page, sheet, dpr, token) {
-  const viewport = page.getViewport({ scale: state.preferences.pdfZoom * dpr });
+/* Zoom reads as a multiple of a page that fits the stage. Without the fit
+   factor a phone rendered every sheet far wider than the screen, the stylesheet
+   clamped the canvas back down to the stage, and the zoom control moved
+   nothing. A stage with room to spare keeps the page at its natural size, so
+   this only ever scales down. */
+function pdfFitScale(page, sheetCount) {
+  const natural = page.getViewport({ scale: 1 }).width;
+  const available = stageContentWidth() / sheetCount;
+  if (!(available > 0) || !(natural > 0)) return 1;
+  return Math.min(1, available / natural);
+}
+
+/* clientWidth still counts the stage's own side padding, which the page never
+   gets to use. */
+function stageContentWidth() {
+  const stage = document.querySelector("#reader-stage");
+  if (!stage) return 0;
+  const style = getComputedStyle(stage);
+  return stage.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+}
+
+function clampPDFZoom(zoom) {
+  return Math.min(3, Math.max(0.5, zoom));
+}
+
+async function renderPDFSheet(page, sheet, dpr, scale, token) {
+  const viewport = page.getViewport({ scale: scale * dpr });
   const canvas = sheet.querySelector("canvas");
   const textLayerContainer = sheet.querySelector(".pdf-text-layer");
   const context = canvas.getContext("2d", { alpha: false });
@@ -274,6 +304,7 @@ function installControls() {
     if (["reader-stage", "pdf-page", "pdf-spread", "pdf-canvas", "pdf-canvas-secondary"].includes(event.target.id)) toggleChrome();
   });
   bindTouchSurface(document.querySelector("#reader-stage"));
+  if (format === "pdf") bindPDFPinch(document.querySelector("#reader-stage"));
 
   updateSettingsUI();
   updateThemeButtons();
@@ -530,9 +561,62 @@ function bindTouchSurface(target) {
     touch = null;
     const selection = target.getSelection?.() || target.ownerDocument?.getSelection?.();
     if (selection && !selection.isCollapsed) return;
+    if (horizontallyPannable()) return;
     if (Math.abs(dx) > 52 && Math.abs(dx) > Math.abs(dy) * 1.35) navigate(dx < 0 ? 1 : -1);
   }, { passive: true });
   target.addEventListener("touchcancel", () => { touch = null; }, { passive: true });
+}
+
+/* A sheet zoomed past the stage pans sideways, and that drag is the reader
+   moving across the page rather than asking for the next one. */
+function horizontallyPannable() {
+  if (format !== "pdf") return false;
+  const stage = document.querySelector("#reader-stage");
+  return !!stage && stage.scrollWidth - stage.clientWidth > 1;
+}
+
+/* Pinch to zoom the sheet. The slider is two taps deep inside a sheet panel,
+   which is a long way to reach mid-page on a phone, and the browser's own pinch
+   scales the chrome along with the book. Rasterising a PDF page per touchmove
+   is far too slow to track fingers, so the gesture previews with a transform
+   and only re-renders once they lift. */
+function bindPDFPinch(stage) {
+  const spread = document.querySelector("#pdf-spread");
+  const spanOf = touches => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+  let pinch = null;
+
+  stage.addEventListener("touchstart", event => {
+    if (event.touches.length !== 2) return;
+    const span = spanOf(event.touches);
+    if (!span) return;
+    pinch = { span, zoom: state.preferences.pdfZoom, ratio: 1 };
+  }, { passive: true });
+
+  stage.addEventListener("touchmove", event => {
+    if (!pinch || event.touches.length !== 2) return;
+    event.preventDefault();
+    pinch.ratio = clampPDFZoom(pinch.zoom * (spanOf(event.touches) / pinch.span)) / pinch.zoom;
+    spread.style.transform = `scale(${pinch.ratio})`;
+  }, { passive: false });
+
+  const settle = () => {
+    if (!pinch) return;
+    const zoom = clampPDFZoom(pinch.zoom * pinch.ratio);
+    pinch = null;
+    state.pinchedUntil = Date.now() + 400;
+    if (Math.abs(zoom - state.preferences.pdfZoom) < 0.005) { spread.style.transform = ""; return; }
+    updatePreference("pdfZoom", zoom, () => renderPDFPage());
+  };
+  stage.addEventListener("touchend", settle, { passive: true });
+  stage.addEventListener("touchcancel", settle, { passive: true });
+
+  /* Lifting two fingers can still synthesise a click, which would otherwise
+     turn a zoom into a page turn or hide the chrome. */
+  stage.addEventListener("click", event => {
+    if (Date.now() >= state.pinchedUntil) return;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
 }
 
 /* ---------- navigation ---------- */
@@ -947,8 +1031,7 @@ function adjustZoom(direction) {
     adjustFont(direction * 5);
     return;
   }
-  const value = Math.min(Math.max(state.preferences.pdfZoom + direction * 0.05, 0.5), 3);
-  updatePreference("pdfZoom", value, () => renderPDFPage());
+  updatePreference("pdfZoom", clampPDFZoom(state.preferences.pdfZoom + direction * 0.05), () => renderPDFPage());
 }
 
 function resetPreferences() {
