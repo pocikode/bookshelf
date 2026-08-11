@@ -13,135 +13,215 @@
   <script type="module" src="{{asset "reader.js"}}" defer></script>
 </head>
 <body class="reader-page">
-  <main id="reader-app" class="reader-app is-loading" data-book-id="{{.Book.ID}}" data-format="{{.Book.Format}}" data-file-hash="{{.Book.FileHash}}" data-page-count="{{.Book.PageCount}}" data-file-url="/api/books/{{.Book.ID}}/file" data-worker-url="{{asset "pdf.worker.js"}}">
-    <header id="reader-header" class="reader-chrome reader-header">
-      <div class="reader-header-start">
-        <button id="toc-toggle" class="reader-icon-button" type="button" aria-expanded="false" aria-controls="toc" aria-label="Open contents" title="Contents">Menu</button>
-        <a class="reader-icon-button reader-library-link" href="/" aria-label="Back to library" title="Back to library">Library</a>
-      </div>
-      <div class="reader-title">
-        <h1>{{.Book.Title}}</h1>
-        <p id="reader-section">Restoring position...</p>
-      </div>
-      <div class="reader-header-actions">
-        <span class="reader-version">{{.Version}}</span>
-        <button id="settings-toggle" class="reader-icon-button" type="button" aria-expanded="false" aria-controls="reader-settings" aria-label="Open reading settings" title="Reading settings">Aa</button>
-        <button id="theme" class="reader-icon-button" type="button" aria-label="Toggle theme" title="Toggle theme">Theme</button>
-        <button id="fullscreen" class="reader-icon-button" type="button" aria-label="Enter fullscreen" title="Enter fullscreen">Full</button>
-        <span id="sync-state" class="sync-state" role="status">Booting</span>
-      </div>
-    </header>
+  <svg class="icon-sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-library" viewBox="0 0 24 24"><path d="M4 4h5v16H4zM11 4h4v16h-4zM17.4 4.6l3 15.2"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M3 19l5-14 5 14M4.6 15h6.8M15 19l3-9 3 9M15.9 16.4h4.2"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v1.6M12 19.4V21M3 12h1.6M19.4 12H21M5.6 5.6l1.1 1.1M17.3 17.3l1.1 1.1M18.4 5.6l-1.1 1.1M6.7 17.3l-1.1 1.1"/></symbol>
+    <symbol id="i-slider" viewBox="0 0 24 24"><path d="M3 8h12M19 8h2M3 16h4M11 16h10"/><circle cx="17" cy="8" r="2"/><circle cx="9" cy="16" r="2"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5.5M12 7.8h.01"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M14.5 5l-7 7 7 7"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-.7 5.2 2.7 2.8H7.5l2.7-2.8z"/><path d="M12 11.5V20"/></symbol>
+    <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
+    <symbol id="i-contract" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
+    <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+    <symbol id="i-chevrons-left" viewBox="0 0 24 24"><path d="M12.5 6l-6 6 6 6M19 6l-6 6 6 6"/></symbol>
+    <symbol id="i-chevrons-right" viewBox="0 0 24 24"><path d="M11.5 6l6 6-6 6M5 6l6 6-6 6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5V5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3L7 7M17 17l1.7 1.7M18.7 5.3L17 7M7 17l-1.7 1.7"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.2A8.2 8.2 0 019.8 4 8.2 8.2 0 1020 14.2z"/></symbol>
+    <symbol id="i-book-open" viewBox="0 0 24 24"><path d="M12 6.5C10.5 5.3 8.4 4.7 5 4.7v13c3.4 0 5.5.6 7 1.8 1.5-1.2 3.6-1.8 7-1.8v-13c-3.4 0-5.5.6-7 1.8zM12 6.5v13"/></symbol>
+    <symbol id="i-line-height" viewBox="0 0 24 24"><path d="M4 4l3 3M4 4L1 7M4 4v16M4 20l3-3M4 20l-3-3M10 6h11M10 12h11M10 18h11"/></symbol>
+    <symbol id="i-margin" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M8 8h8v8H8z"/></symbol>
+    <symbol id="i-scroll" viewBox="0 0 24 24"><rect x="6" y="3.5" width="12" height="17" rx="2"/><path d="M12 8v8M12 16l-2.2-2.2M12 16l2.2-2.2"/></symbol>
+    <symbol id="i-pages" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="7" height="15" rx="1.5"/><rect x="13.5" y="4.5" width="7" height="15" rx="1.5"/></symbol>
+  </svg>
 
+  <main id="reader-app" class="reader-app is-loading" data-book-id="{{.Book.ID}}" data-format="{{.Book.Format}}" data-file-hash="{{.Book.FileHash}}" data-page-count="{{.Book.PageCount}}" data-file-url="/api/books/{{.Book.ID}}/file" data-worker-url="{{asset "pdf.worker.js"}}">
     <div id="reader-backdrop" class="reader-backdrop" hidden></div>
 
-    <aside id="toc" class="reader-panel reader-toc" hidden aria-label="Table of contents">
-      <div class="reader-panel-header">
-        <div>
-          <span class="reader-panel-kicker">Navigate</span>
-          <h2>Contents</h2>
-        </div>
-        <button id="toc-close" class="reader-panel-close" type="button" aria-label="Close contents">Close</button>
+    <aside id="reader-sidebar" class="reader-sidebar" hidden aria-label="Book navigation">
+      <div class="reader-sidebar-grip" aria-hidden="true"></div>
+
+      <div class="reader-sidebar-head">
+        <button id="sidebar-close" class="reader-round" type="button" aria-label="Close sidebar" title="Close sidebar">
+          <svg class="icon icon-back"><use href="#i-arrow-left"></use></svg>
+          <svg class="icon icon-list"><use href="#i-list"></use></svg>
+        </button>
+        <button id="sidebar-pin" class="reader-round reader-round-soft reader-pin-only" type="button" aria-pressed="false" aria-label="Pin sidebar" title="Pin sidebar"><svg class="icon"><use href="#i-pin"></use></svg></button>
       </div>
-      <nav aria-label="Book contents">
+
+      <div class="reader-book-card">
+        {{if .Book.HasCover}}
+          <img class="reader-book-cover" src="/api/books/{{.Book.ID}}/cover" alt="" loading="lazy">
+        {{else}}
+          <span class="reader-book-cover reader-book-cover-blank" aria-hidden="true"><svg class="icon"><use href="#i-book-open"></use></svg></span>
+        {{end}}
+        <div class="reader-book-meta">
+          <h2>{{.Book.Title}}</h2>
+          <p>{{if .Book.Author}}{{.Book.Author}}{{else}}Unknown author{{end}}</p>
+        </div>
+      </div>
+
+      <div id="sidebar-toc" class="reader-sidebar-body" role="tabpanel" aria-label="Table of contents">
         <ol id="toc-list"></ol>
-      </nav>
+        <p id="toc-empty" class="reader-sidebar-empty" hidden>This book has no table of contents.</p>
+      </div>
+
+      <div id="sidebar-info" class="reader-sidebar-body" role="tabpanel" aria-label="Book details" hidden>
+        <dl class="reader-detail-list">
+          <div><dt>Format</dt><dd>{{.Book.Format}}</dd></div>
+          <div><dt>Author</dt><dd>{{if .Book.Author}}{{.Book.Author}}{{else}}Unknown{{end}}</dd></div>
+          {{if .Book.PageCount}}<div><dt>Pages</dt><dd>{{.Book.PageCount}}</dd></div>{{end}}
+          <div><dt>Progress</dt><dd id="detail-progress">—</dd></div>
+          <div><dt>Location</dt><dd id="detail-section">—</dd></div>
+          <div><dt>Sync</dt><dd id="detail-sync">Booting</dd></div>
+          {{if .Book.FileHash}}<div><dt>Hash</dt><dd class="reader-detail-hash">{{slice .Book.FileHash 0 16}}</dd></div>{{end}}
+          <div><dt>Build</dt><dd class="reader-detail-hash">{{.Version}}</dd></div>
+        </dl>
+        <a class="reader-detail-link" href="/"><svg class="icon"><use href="#i-library"></use></svg>Back to library</a>
+      </div>
+
+      <div class="reader-sidebar-tabs" role="tablist" aria-label="Sidebar sections">
+        <button class="reader-sidebar-tab is-active" type="button" role="tab" data-sidebar-tab="toc" aria-selected="true" aria-controls="sidebar-toc" title="Contents" aria-label="Contents"><svg class="icon"><use href="#i-list"></use></svg></button>
+        <button class="reader-sidebar-tab" type="button" role="tab" data-sidebar-tab="info" aria-selected="false" aria-controls="sidebar-info" title="Details" aria-label="Details"><svg class="icon"><use href="#i-info"></use></svg></button>
+      </div>
+
+      <div id="sidebar-resize" class="reader-sidebar-resize" role="separator" tabindex="0" aria-label="Resize sidebar" aria-orientation="vertical"></div>
     </aside>
 
-    <aside id="reader-settings" class="reader-panel reader-settings" hidden aria-label="Reading settings">
-      <div class="reader-panel-header">
-        <div>
-          <span class="reader-panel-kicker">Customize</span>
-          <h2>Reading settings</h2>
-        </div>
-        <button id="settings-close" class="reader-panel-close" type="button" aria-label="Close reading settings">Close</button>
-      </div>
-      <div class="reader-settings-group">
-        <div class="reader-setting-row">
-          <label for="font-size">Text size</label>
-          <div class="reader-zoom-controls">
-            <button id="zoom-out" class="reader-zoom-button" type="button" aria-label="Zoom out" title="Zoom out">-</button>
-            <output id="font-size-value" for="font-size">100%</output>
-            <button id="zoom-in" class="reader-zoom-button" type="button" aria-label="Zoom in" title="Zoom in">+</button>
-          </div>
-        </div>
-        <input id="font-size" type="range" min="75" max="180" step="5" value="100">
-      </div>
-      <div class="reader-settings-group reader-epub-setting">
-        <div class="reader-setting-row">
-          <label for="line-height">Line height</label>
-          <output id="line-height-value" for="line-height">1.5</output>
-        </div>
-        <input id="line-height" type="range" min="1.2" max="2" step="0.1" value="1.5">
-      </div>
-      <div class="reader-settings-group reader-epub-setting">
-        <div class="reader-setting-row">
-          <label for="text-width">Text width</label>
-          <output id="text-width-value" for="text-width">52rem</output>
-        </div>
-        <input id="text-width" type="range" min="32" max="80" step="2" value="52">
-      </div>
-      <div class="reader-settings-group reader-epub-setting">
-        <label for="reader-flow">Reading mode</label>
-        <select id="reader-flow" class="reader-setting-select">
-          <option value="paginated">Paginated</option>
-          <option value="scrolled">Scrolling</option>
-        </select>
-      </div>
-      <div class="reader-settings-group reader-pdf-setting">
-        <div class="reader-setting-row">
-          <label for="pdf-zoom">PDF zoom</label>
-          <div class="reader-zoom-controls">
-            <button id="pdf-zoom-out" class="reader-zoom-button" type="button" aria-label="Zoom out" title="Zoom out">-</button>
-            <output id="pdf-zoom-value" for="pdf-zoom">125%</output>
-            <button id="pdf-zoom-in" class="reader-zoom-button" type="button" aria-label="Zoom in" title="Zoom in">+</button>
-          </div>
-        </div>
-        <input id="pdf-zoom" type="range" min="50" max="300" step="5" value="125">
-      </div>
-      <div class="reader-settings-group reader-pdf-setting">
-        <label>PDF page tone</label>
-        <div class="reader-segmented" role="group" aria-label="PDF page tone">
-          <button class="reader-segment" data-pdf-tone="paper" type="button">Paper</button>
-          <button class="reader-segment" data-pdf-tone="sepia" type="button">Sepia</button>
-          <button class="reader-segment" data-pdf-tone="light" type="button">Light</button>
-        </div>
-      </div>
-      <button id="reset-settings" class="reader-reset" type="button">Reset settings</button>
-    </aside>
+    <div id="reader-frame" class="reader-frame">
+      <div id="reader-top-trigger" class="reader-hover-trigger reader-hover-top" aria-hidden="true"></div>
+      <div id="reader-bottom-trigger" class="reader-hover-trigger reader-hover-bottom" aria-hidden="true"></div>
 
-    <section id="reader-stage" class="reader-stage" aria-label="Book reader">
-      <div id="reader-loading" class="reader-loading" role="status" aria-live="polite">
-        <div class="reader-loading-mark" aria-hidden="true"></div>
-        <p id="reader-loading-text">Restoring your place...</p>
-      </div>
-      <div id="epub-viewer" hidden></div>
-      <div id="pdf-page" hidden>
-        <div id="pdf-spread" class="is-single">
-          <div class="pdf-sheet">
-            <canvas id="pdf-canvas"></canvas>
-            <div class="pdf-text-layer"></div>
-          </div>
-          <div class="pdf-sheet" hidden>
-            <canvas id="pdf-canvas-secondary"></canvas>
-            <div class="pdf-text-layer"></div>
-          </div>
+      <header id="reader-header" class="reader-bar reader-header">
+        <div class="reader-bar-group">
+          <button id="sidebar-toggle" class="reader-round reader-desktop-only" type="button" aria-expanded="false" aria-controls="reader-sidebar" aria-label="Contents" title="Contents (T)"><svg class="icon"><use href="#i-list"></use></svg></button>
+          <a class="reader-round" href="/" aria-label="Back to library" title="Back to library"><svg class="icon"><use href="#i-library"></use></svg></a>
         </div>
-      </div>
-      <button id="reader-prev-zone" class="reader-tap-zone reader-prev-zone" type="button" aria-label="Previous page"></button>
-      <button id="reader-next-zone" class="reader-tap-zone reader-next-zone" type="button" aria-label="Next page"></button>
-    </section>
+        <h1 class="reader-titlebar">{{.Book.Title}}</h1>
+        <div class="reader-bar-group reader-bar-group-end">
+          <span id="sync-state" class="sync-state" role="status" data-state="booting" title="Sync state"><span class="sync-dot" aria-hidden="true"></span><span class="sync-label">Booting</span></span>
+          <button id="settings-toggle" class="reader-round" type="button" aria-expanded="false" aria-controls="panel-font" aria-label="Font and layout" title="Font and layout (S)"><svg class="icon"><use href="#i-type"></use></svg></button>
+          <button id="color-toggle" class="reader-round" type="button" aria-expanded="false" aria-controls="panel-color" aria-label="Colour and theme" title="Colour and theme (C)"><svg class="icon"><use href="#i-palette"></use></svg></button>
+          <button id="fullscreen" class="reader-round reader-desktop-only" type="button" aria-label="Enter fullscreen" title="Fullscreen (F)"><svg class="icon"><use href="#i-expand"></use></svg></button>
+        </div>
+      </header>
 
-    <footer id="reader-footer" class="reader-chrome reader-footer">
-      <button id="reader-prev" class="reader-nav-button" type="button" aria-label="Previous page" title="Previous page">Prev</button>
-      <div class="reader-progress-control">
-        <div class="reader-progress-meta">
-          <span id="reader-progress">Preparing...</span>
-          <span id="reader-chapter"></span>
+      <section id="reader-stage" class="reader-stage" aria-label="Book reader">
+        <div id="reader-loading" class="reader-loading" role="status" aria-live="polite">
+          <div class="reader-loading-mark" aria-hidden="true"></div>
+          <p id="reader-loading-text">Restoring your place...</p>
         </div>
-        <input id="reader-progress-slider" type="range" min="0" max="100" step="0.1" value="0" aria-label="Reading progress">
+        <div id="epub-viewer" hidden></div>
+        <div id="pdf-page" hidden>
+          <div id="pdf-spread" class="is-single">
+            <div class="pdf-sheet">
+              <canvas id="pdf-canvas"></canvas>
+              <div class="pdf-text-layer"></div>
+            </div>
+            <div class="pdf-sheet" hidden>
+              <canvas id="pdf-canvas-secondary"></canvas>
+              <div class="pdf-text-layer"></div>
+            </div>
+          </div>
+        </div>
+        <button id="reader-prev-zone" class="reader-tap-zone reader-prev-zone" type="button" aria-label="Previous page"></button>
+        <button id="reader-next-zone" class="reader-tap-zone reader-next-zone" type="button" aria-label="Next page"></button>
+      </section>
+
+      <div class="reader-band reader-band-top" aria-hidden="true"><span id="reader-section">Restoring position...</span></div>
+      <div class="reader-band reader-band-bottom" aria-hidden="true">
+        <span id="reader-remaining"></span>
+        <span id="reader-progress">Preparing...</span>
       </div>
-      <button id="reader-next" class="reader-nav-button" type="button" aria-label="Next page" title="Next page">Next</button>
-    </footer>
+
+      <footer id="reader-footer" class="reader-bar reader-footer">
+        <section id="panel-progress" class="reader-sheet" data-panel="progress" hidden aria-label="Reading progress">
+          <div class="reader-jump-row">
+            <button id="reader-prev-section-m" class="reader-round" type="button" aria-label="Previous chapter" title="Previous chapter"><svg class="icon"><use href="#i-chevrons-left"></use></svg></button>
+            <input id="page-jump-m" class="reader-jump-input" type="text" inputmode="numeric" autocomplete="off" aria-label="Jump to page or percent">
+            <button id="reader-next-section-m" class="reader-round" type="button" aria-label="Next chapter" title="Next chapter"><svg class="icon"><use href="#i-chevrons-right"></use></svg></button>
+          </div>
+          <div class="reader-range" data-range>
+            <span class="reader-range-fill" aria-hidden="true"></span>
+            <span class="reader-range-edge reader-range-start" aria-hidden="true">Start</span>
+            <span class="reader-range-edge reader-range-end" aria-hidden="true">End</span>
+            <span class="reader-range-bubble" aria-hidden="true"></span>
+            <input id="reader-progress-slider-m" type="range" min="0" max="100" step="0.1" value="0" aria-label="Reading progress">
+          </div>
+        </section>
+
+        <section id="panel-font" class="reader-sheet" data-panel="font" hidden aria-label="Font and layout">
+          <div class="reader-range" data-range data-bubble-suffix="%">
+            <span class="reader-range-fill" aria-hidden="true"></span>
+            <span class="reader-range-edge reader-range-start reader-range-small" aria-hidden="true">A</span>
+            <span class="reader-range-edge reader-range-end reader-range-large" aria-hidden="true">A</span>
+            <span class="reader-range-bubble" aria-hidden="true"></span>
+            <input id="font-size" type="range" min="75" max="180" step="5" value="100" aria-label="Text size">
+          </div>
+          <div class="reader-range-pair">
+            <div class="reader-range reader-epub-setting" data-range>
+              <span class="reader-range-fill" aria-hidden="true"></span>
+              <span class="reader-range-edge reader-range-start" aria-hidden="true">Tight</span>
+              <span class="reader-range-edge reader-range-end" aria-hidden="true">Loose</span>
+              <span class="reader-range-bubble reader-range-bubble-icon" aria-hidden="true"><svg class="icon"><use href="#i-line-height"></use></svg></span>
+              <input id="line-height" type="range" min="1.2" max="2" step="0.1" value="1.5" aria-label="Line height">
+            </div>
+            <div class="reader-range reader-epub-setting" data-range>
+              <span class="reader-range-fill" aria-hidden="true"></span>
+              <span class="reader-range-edge reader-range-start" aria-hidden="true">Wide</span>
+              <span class="reader-range-edge reader-range-end" aria-hidden="true">Narrow</span>
+              <span class="reader-range-bubble reader-range-bubble-icon" aria-hidden="true"><svg class="icon"><use href="#i-margin"></use></svg></span>
+              <input id="text-width" type="range" min="32" max="80" step="2" value="52" aria-label="Text width">
+            </div>
+          </div>
+          <div class="reader-range reader-pdf-setting" data-range data-bubble-suffix="%">
+            <span class="reader-range-fill" aria-hidden="true"></span>
+            <span class="reader-range-edge reader-range-start reader-range-small" aria-hidden="true">A</span>
+            <span class="reader-range-edge reader-range-end reader-range-large" aria-hidden="true">A</span>
+            <span class="reader-range-bubble" aria-hidden="true"></span>
+            <input id="pdf-zoom" type="range" min="50" max="300" step="5" value="125" aria-label="PDF zoom">
+          </div>
+          <div class="reader-choices reader-epub-setting" role="group" aria-label="Reading mode">
+            <button class="reader-choice" type="button" data-flow="paginated"><svg class="icon"><use href="#i-pages"></use></svg>Paginated</button>
+            <button class="reader-choice" type="button" data-flow="scrolled"><svg class="icon"><use href="#i-scroll"></use></svg>Scrolling</button>
+          </div>
+          <button id="reset-settings" class="reader-list-action" type="button">Reset to defaults</button>
+        </section>
+
+        <section id="panel-color" class="reader-sheet" data-panel="color" hidden aria-label="Colour and theme">
+          <div class="reader-choices" role="group" aria-label="Appearance">
+            <button class="reader-choice" type="button" data-theme-mode="light"><svg class="icon"><use href="#i-sun"></use></svg>Light</button>
+            <button class="reader-choice" type="button" data-theme-mode="dark"><svg class="icon"><use href="#i-moon"></use></svg>Dark</button>
+          </div>
+          <div class="reader-choices reader-pdf-setting" role="group" aria-label="Page tone">
+            <button class="reader-choice" data-pdf-tone="paper" type="button"><span class="tone-swatch tone-paper" aria-hidden="true"></span>Paper</button>
+            <button class="reader-choice" data-pdf-tone="sepia" type="button"><span class="tone-swatch tone-sepia" aria-hidden="true"></span>Sepia</button>
+            <button class="reader-choice" data-pdf-tone="light" type="button"><span class="tone-swatch tone-light" aria-hidden="true"></span>White</button>
+          </div>
+        </section>
+
+        <div class="reader-footer-desktop">
+          <button id="reader-prev-section" class="reader-round" type="button" aria-label="Previous chapter" title="Previous chapter"><svg class="icon"><use href="#i-chevrons-left"></use></svg></button>
+          <button id="reader-prev" class="reader-round" type="button" aria-label="Previous page" title="Previous page"><svg class="icon"><use href="#i-chevron-left"></use></svg></button>
+          <input id="page-jump" class="reader-jump-input" type="text" inputmode="numeric" autocomplete="off" aria-label="Jump to page or percent">
+          <input id="reader-progress-slider" class="reader-thin-slider" type="range" min="0" max="100" step="0.1" value="0" aria-label="Reading progress">
+          <span id="reader-footer-chapter" class="reader-footer-chapter"></span>
+          <button id="reader-next" class="reader-round" type="button" aria-label="Next page" title="Next page"><svg class="icon"><use href="#i-chevron-right"></use></svg></button>
+          <button id="reader-next-section" class="reader-round" type="button" aria-label="Next chapter" title="Next chapter"><svg class="icon"><use href="#i-chevrons-right"></use></svg></button>
+        </div>
+
+        <nav class="reader-footer-mobile" aria-label="Reader actions">
+          <button class="reader-tab" type="button" data-footer-tab="toc" title="Contents" aria-label="Contents"><svg class="icon"><use href="#i-list"></use></svg></button>
+          <button class="reader-tab" type="button" data-footer-tab="color" title="Colour" aria-label="Colour"><svg class="icon"><use href="#i-palette"></use></svg></button>
+          <button class="reader-tab" type="button" data-footer-tab="progress" title="Reading progress" aria-label="Reading progress"><svg class="icon"><use href="#i-slider"></use></svg></button>
+          <button class="reader-tab" type="button" data-footer-tab="font" title="Font and layout" aria-label="Font and layout"><svg class="icon"><use href="#i-type"></use></svg></button>
+          <button class="reader-tab" type="button" data-footer-tab="fullscreen" title="Fullscreen" aria-label="Fullscreen"><svg class="icon"><use href="#i-expand"></use></svg></button>
+        </nav>
+      </footer>
+    </div>
   </main>
 </body>
 </html>

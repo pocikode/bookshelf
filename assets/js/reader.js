@@ -9,7 +9,9 @@ const csrf = document.querySelector('meta[name="csrf-token"]')?.content || "";
 const endpoint = `/api/books/${id}/progress`;
 const pdfTones = ["paper", "sepia", "light"];
 const preferenceKey = `bookshelf:v2:reader:${id}`;
+const layoutKey = "bookshelf:v1:reader-layout";
 const defaults = { fontSize: 100, lineHeight: 1.5, textWidth: 52, flow: "paginated", pdfZoom: 1.25, pdfTone: "paper" };
+const hoverCapable = window.matchMedia("(hover: hover)").matches;
 const state = {
   phase: "booting",
   active: false,
@@ -18,7 +20,7 @@ const state = {
   observed: null,
   retry: 0,
   timer: null,
-  hideTimer: null,
+  chromeTimer: null,
   book: null,
   rendition: null,
   pdf: null,
@@ -28,9 +30,15 @@ const state = {
   locations: null,
   currentLocation: null,
   tocItems: [],
+  tocFlat: [],
+  activeTOC: -1,
   percent: 0,
   savedPercent: 0,
+  panel: "",
+  ready: false,
+  resizeTimer: null,
   preferences: loadPreferences(),
+  layout: loadLayout(),
   boundDocuments: new WeakSet(),
 };
 
@@ -48,9 +56,9 @@ async function boot() {
   installControls();
   app.classList.remove("is-loading");
   document.querySelector("#reader-loading")?.remove();
+  state.ready = true;
   setPhase("ready");
-  setChromeVisible(true);
-  scheduleChromeHide();
+  flashChrome();
 }
 
 async function bootEPUB(saved) {
@@ -68,12 +76,24 @@ async function bootEPUB(saved) {
   await rendition.display(saved.position || undefined);
   const navigation = await book.loaded.navigation;
   state.tocItems = navigation.toc || [];
-  renderTOC(state.tocItems, item => rendition.display(item.href));
+  state.tocFlat = flattenTOC(state.tocItems);
+  for (const entry of state.tocFlat) entry.number = spineIndexFor(book, entry.item.href);
+  renderTOC();
   if (!state.locations) {
-    setProgressMessage("Preparing reading progress...");
+    setProgressMessage("Preparing progress...");
     void prepareEPUBLocations(book);
   }
   for (const contents of rendition.getContents()) attachEPUBContents(contents);
+}
+
+function spineIndexFor(book, href) {
+  if (!href) return null;
+  try {
+    const section = book.spine?.get(href);
+    return Number.isInteger(section?.index) ? section.index + 1 : null;
+  } catch {
+    return null;
+  }
 }
 
 function loadEPUBLocations(book) {
@@ -102,7 +122,6 @@ async function prepareEPUBLocations(book) {
 
 async function bootPDF(saved) {
   document.querySelector("#pdf-page").hidden = false;
-  state.pdfZoom = state.preferences.pdfZoom;
   setPDFTone(state.preferences.pdfTone, false);
   pdfjsLib.GlobalWorkerOptions.workerSrc = app.dataset.workerUrl;
   state.pdf = await pdfjsLib.getDocument({ url: app.dataset.fileUrl, withCredentials: true }).promise;
@@ -111,17 +130,27 @@ async function bootPDF(saved) {
   try {
     const outline = await state.pdf.getOutline();
     state.tocItems = outline || [];
-    renderTOC(state.tocItems, async item => {
-      const destination = typeof item.dest === "string" ? await state.pdf.getDestination(item.dest) : item.dest;
-      if (!destination) return;
-      const pageIndex = await state.pdf.getPageIndex(destination[0]);
-      state.pdfPage = normalizePage(pageIndex + 1, state.pdf.numPages, pdfUsesSpread());
-      await renderPDFPage();
-      observe({ page: state.pdfPage });
-    });
+    state.tocFlat = flattenTOC(state.tocItems);
+    await resolvePDFOutlinePages();
+    renderTOC();
+    markActivePDFTOC();
   } catch (error) {
     console.warn("Could not load PDF outline", error);
+    renderTOC();
   }
+}
+
+async function resolvePDFOutlinePages() {
+  await Promise.all(state.tocFlat.map(async entry => {
+    try {
+      const raw = entry.item.dest;
+      const destination = typeof raw === "string" ? await state.pdf.getDestination(raw) : raw;
+      if (!destination?.[0]) return;
+      entry.number = (await state.pdf.getPageIndex(destination[0])) + 1;
+    } catch {
+      /* An unresolvable outline entry simply shows no page number. */
+    }
+  }));
 }
 
 async function renderPDFPage() {
@@ -141,6 +170,7 @@ async function renderPDFPage() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   await Promise.all(pages.map((page, index) => renderPDFSheet(page, sheets[index], dpr, token)));
   if (token !== state.pdfRenderToken) return;
+  markActivePDFTOC();
   updatePDFProgress();
 }
 
@@ -171,57 +201,285 @@ async function renderPDFSheet(page, sheet, dpr, token) {
   await textLayer.render();
 }
 
+/* ---------- controls ---------- */
+
 function installControls() {
-  const tocToggle = document.querySelector("#toc-toggle");
-  const settingsToggle = document.querySelector("#settings-toggle");
-  tocToggle.addEventListener("click", () => togglePanel("toc"));
-  settingsToggle.addEventListener("click", () => togglePanel("reader-settings"));
-  document.querySelector("#toc-close").addEventListener("click", closePanels);
-  document.querySelector("#settings-close").addEventListener("click", closePanels);
-  document.querySelector("#reader-backdrop").addEventListener("click", closePanels);
-  document.querySelector("#reader-prev").addEventListener("click", () => navigate(-1));
-  document.querySelector("#reader-next").addEventListener("click", () => navigate(1));
-  document.querySelector("#reader-prev-zone").addEventListener("click", () => navigate(-1));
-  document.querySelector("#reader-next-zone").addEventListener("click", () => navigate(1));
-  document.querySelector("#reader-progress-slider").addEventListener("change", event => seek(Number(event.currentTarget.value) / 100));
-  document.querySelector("#reader-progress-slider").addEventListener("input", event => previewProgress(Number(event.currentTarget.value) / 100));
-  document.querySelector("#font-size").addEventListener("input", event => updatePreference("fontSize", Number(event.currentTarget.value), applyEPUBStyles));
-  document.querySelector("#line-height").addEventListener("input", event => updatePreference("lineHeight", Number(event.currentTarget.value), applyEPUBStyles));
-  document.querySelector("#text-width").addEventListener("input", event => updatePreference("textWidth", Number(event.currentTarget.value), applyEPUBStyles));
-  document.querySelector("#pdf-zoom").addEventListener("input", event => updatePreference("pdfZoom", Number(event.currentTarget.value) / 100, () => renderPDFPage()));
-  document.querySelector("#zoom-out").addEventListener("click", () => adjustZoom(-1));
-  document.querySelector("#zoom-in").addEventListener("click", () => adjustZoom(1));
-  document.querySelector("#pdf-zoom-out").addEventListener("click", () => adjustZoom(-1));
-  document.querySelector("#pdf-zoom-in").addEventListener("click", () => adjustZoom(1));
-  document.querySelector("#reader-flow").addEventListener("change", event => setEPUBFlow(event.currentTarget.value));
-  document.querySelector("#reset-settings").addEventListener("click", resetPreferences);
-  document.querySelector("#theme").addEventListener("click", toggleTheme);
-  document.querySelector("#fullscreen").addEventListener("click", toggleFullscreen);
+  applyLayout();
+
+  on("#sidebar-toggle", "click", toggleSidebar);
+  on("#sidebar-close", "click", closeSidebar);
+  on("#sidebar-pin", "click", toggleSidebarPin);
+  on("#reader-backdrop", "click", () => { closeSidebar(); closePanels(); });
+  for (const tab of document.querySelectorAll("[data-sidebar-tab]")) tab.addEventListener("click", () => selectSidebarTab(tab.dataset.sidebarTab));
+  installSidebarResize();
+
+  on("#settings-toggle", "click", () => togglePanel("font"));
+  on("#color-toggle", "click", () => togglePanel("color"));
+  on("#fullscreen", "click", toggleFullscreen);
+  for (const tab of document.querySelectorAll("[data-footer-tab]")) {
+    tab.addEventListener("click", () => {
+      const name = tab.dataset.footerTab;
+      if (name === "toc") toggleSidebar();
+      else if (name === "fullscreen") toggleFullscreen();
+      else togglePanel(name);
+    });
+  }
+
+  on("#reader-prev", "click", () => navigate(-1));
+  on("#reader-next", "click", () => navigate(1));
+  on("#reader-prev-zone", "click", () => navigate(-1));
+  on("#reader-next-zone", "click", () => navigate(1));
+  on("#reader-prev-section", "click", () => navigateSection(-1));
+  on("#reader-next-section", "click", () => navigateSection(1));
+  on("#reader-prev-section-m", "click", () => navigateSection(-1));
+  on("#reader-next-section-m", "click", () => navigateSection(1));
+
+  for (const slider of sliders()) {
+    slider.addEventListener("change", event => seek(Number(event.currentTarget.value) / 100));
+    slider.addEventListener("input", event => {
+      const percent = Number(event.currentTarget.value) / 100;
+      syncRange(event.currentTarget, previewProgress(percent));
+    });
+  }
+  for (const jump of jumpInputs()) {
+    jump.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); applyJump(event.currentTarget.value); event.currentTarget.blur(); } });
+    jump.addEventListener("blur", event => { event.currentTarget.value = jumpPlaceholder(); });
+  }
+
+  on("#font-size", "input", event => updatePreference("fontSize", Number(event.currentTarget.value), applyEPUBStyles));
+  on("#line-height", "input", event => updatePreference("lineHeight", Number(event.currentTarget.value), applyEPUBStyles));
+  on("#text-width", "input", event => updatePreference("textWidth", Number(event.currentTarget.value), applyEPUBStyles));
+  on("#pdf-zoom", "input", event => updatePreference("pdfZoom", Number(event.currentTarget.value) / 100, () => renderPDFPage()));
+  on("#reset-settings", "click", resetPreferences);
+  for (const wrap of document.querySelectorAll("[data-range]")) {
+    const input = wrap.querySelector('input[type="range"]');
+    /* The progress sliders label their bubble with a page or percent, so they
+       carry their own listener above rather than the generic numeric one. */
+    if (!input || input.id.startsWith("reader-progress-slider")) continue;
+    input.addEventListener("input", event => syncRange(event.currentTarget));
+  }
+  for (const button of document.querySelectorAll("[data-flow]")) button.addEventListener("click", () => setEPUBFlow(button.dataset.flow));
+  for (const button of document.querySelectorAll("[data-theme-mode]")) button.addEventListener("click", () => setTheme(button.dataset.themeMode === "dark"));
   for (const button of document.querySelectorAll("[data-pdf-tone]")) button.addEventListener("click", () => setPDFTone(button.dataset.pdfTone));
 
+  installChromeTriggers();
   document.addEventListener("keydown", handleKeydown);
   document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") save(true); });
   addEventListener("pagehide", () => save(true));
-  addEventListener("resize", () => { if (format === "pdf" && state.pdf) renderPDFPage().catch(error => console.warn("Could not resize PDF", error)); });
+  document.addEventListener("fullscreenchange", updateFullscreenButton);
+  observeStage();
   document.querySelector("#reader-stage").addEventListener("click", event => {
     if (["reader-stage", "pdf-page", "pdf-spread", "pdf-canvas", "pdf-canvas-secondary"].includes(event.target.id)) toggleChrome();
   });
   bindTouchSurface(document.querySelector("#reader-stage"));
+
   updateSettingsUI();
-  updateThemeButton();
-  if (!document.fullscreenEnabled && !app.requestFullscreen && !app.webkitRequestFullscreen) document.querySelector("#fullscreen").hidden = true;
+  updateThemeButtons();
+  updateFullscreenButton();
+  if (!document.fullscreenEnabled && !app.requestFullscreen && !app.webkitRequestFullscreen) {
+    for (const button of document.querySelectorAll('#fullscreen, [data-footer-tab="fullscreen"]')) button.hidden = true;
+  }
 }
 
+function on(selector, event, handler) {
+  document.querySelector(selector)?.addEventListener(event, handler);
+}
+
+const sliders = () => [...document.querySelectorAll('input[type="range"][id^="reader-progress-slider"]')];
+const jumpInputs = () => [...document.querySelectorAll(".reader-jump-input")];
+
+/* ---------- chrome ---------- */
+
+function installChromeTriggers() {
+  const header = document.querySelector("#reader-header");
+  const footer = document.querySelector("#reader-footer");
+  for (const trigger of document.querySelectorAll(".reader-hover-trigger")) {
+    trigger.addEventListener("mouseenter", showChrome);
+  }
+  for (const bar of [header, footer]) {
+    bar.addEventListener("mouseleave", event => {
+      if (!hoverCapable || event.relatedTarget?.closest?.(".reader-bar")) return;
+      hideChrome();
+    });
+    bar.addEventListener("focusin", showChrome);
+  }
+}
+
+function showChrome() {
+  clearTimeout(state.chromeTimer);
+  app.classList.add("chrome-visible");
+}
+
+/* Reveal the bars, then retreat — used on load and after a tap so the reader
+   learns the chrome is there without it sitting over the page. */
+function flashChrome() {
+  showChrome();
+  state.chromeTimer = setTimeout(() => {
+    if (document.querySelector(".reader-bar:hover")) return;
+    hideChrome();
+  }, 2600);
+}
+
+function hideChrome() {
+  clearTimeout(state.chromeTimer);
+  if (state.panel || (isSidebarOpen() && !app.classList.contains("sidebar-pinned"))) return;
+  app.classList.remove("chrome-visible");
+  document.activeElement?.closest?.(".reader-bar")?.blur?.();
+}
+
+function toggleChrome() {
+  if (closePanels()) return;
+  if (!app.classList.contains("sidebar-pinned") && closeSidebar()) return;
+  if (app.classList.contains("chrome-visible")) hideChrome();
+  else showChrome();
+}
+
+/* ---------- sidebar ---------- */
+
+function isSidebarOpen() {
+  return !document.querySelector("#reader-sidebar").hidden;
+}
+
+function toggleSidebar() {
+  if (isSidebarOpen()) closeSidebar();
+  else openSidebar();
+}
+
+function openSidebar() {
+  closePanels();
+  document.querySelector("#reader-sidebar").hidden = false;
+  document.querySelector("#sidebar-toggle").setAttribute("aria-expanded", "true");
+  updateBackdrop();
+  showChrome();
+  applyLayout();
+  markPanelControls();
+  scrollActiveTOCIntoView();
+  return true;
+}
+
+function closeSidebar() {
+  if (!isSidebarOpen()) return false;
+  document.querySelector("#reader-sidebar").hidden = true;
+  document.querySelector("#sidebar-toggle").setAttribute("aria-expanded", "false");
+  updateBackdrop();
+  applyLayout();
+  markPanelControls();
+  return true;
+}
+
+function toggleSidebarPin() {
+  state.layout.pinned = !state.layout.pinned;
+  saveLayout();
+  applyLayout();
+  updateBackdrop();
+}
+
+function selectSidebarTab(name) {
+  for (const tab of document.querySelectorAll("[data-sidebar-tab]")) {
+    const active = tab.dataset.sidebarTab === name;
+    tab.classList.toggle("is-active", active);
+    tab.setAttribute("aria-selected", String(active));
+  }
+  document.querySelector("#sidebar-toc").hidden = name !== "toc";
+  document.querySelector("#sidebar-info").hidden = name !== "info";
+}
+
+function applyLayout() {
+  const pinned = state.layout.pinned && hoverCapable && isSidebarOpen();
+  app.classList.toggle("sidebar-pinned", pinned);
+  app.style.setProperty("--sidebar", `${state.layout.width}rem`);
+  const pin = document.querySelector("#sidebar-pin");
+  pin.setAttribute("aria-pressed", String(state.layout.pinned));
+  pin.title = state.layout.pinned ? "Unpin sidebar" : "Pin sidebar";
+  pin.setAttribute("aria-label", pin.title);
+}
+
+function updateBackdrop() {
+  const covering = isSidebarOpen() && !app.classList.contains("sidebar-pinned");
+  document.querySelector("#reader-backdrop").hidden = !covering;
+}
+
+function installSidebarResize() {
+  const handle = document.querySelector("#sidebar-resize");
+  const sidebar = document.querySelector("#reader-sidebar");
+  const root = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+  handle.addEventListener("pointerdown", event => {
+    event.preventDefault();
+    handle.setPointerCapture(event.pointerId);
+    const move = pointer => {
+      const width = (pointer.clientX - sidebar.getBoundingClientRect().left) / root;
+      state.layout.width = Math.min(Math.max(width, 15), 34);
+      app.style.setProperty("--sidebar", `${state.layout.width}rem`);
+    };
+    const stop = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", stop);
+      saveLayout();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", stop);
+  });
+  handle.addEventListener("keydown", event => {
+    const step = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    state.layout.width = Math.min(Math.max(state.layout.width + step, 15), 34);
+    app.style.setProperty("--sidebar", `${state.layout.width}rem`);
+    saveLayout();
+  });
+}
+
+/* ---------- panels ---------- */
+
+function togglePanel(name) {
+  if (state.panel === name) return closePanels();
+  closePanels();
+  const panel = document.querySelector(`[data-panel="${name}"]`);
+  if (!panel) return false;
+  closeSidebar();
+  panel.hidden = false;
+  state.panel = name;
+  app.classList.add("panel-open");
+  markPanelControls();
+  showChrome();
+  return true;
+}
+
+function closePanels() {
+  if (!state.panel) return false;
+  document.querySelector(`[data-panel="${state.panel}"]`).hidden = true;
+  state.panel = "";
+  app.classList.remove("panel-open");
+  markPanelControls();
+  return true;
+}
+
+function markPanelControls() {
+  document.querySelector("#settings-toggle").setAttribute("aria-expanded", String(state.panel === "font"));
+  document.querySelector("#color-toggle").setAttribute("aria-expanded", String(state.panel === "color"));
+  for (const tab of document.querySelectorAll("[data-footer-tab]")) {
+    const active = tab.dataset.footerTab === "toc" ? isSidebarOpen() : tab.dataset.footerTab === state.panel;
+    tab.classList.toggle("is-active", active);
+  }
+}
+
+/* ---------- keyboard ---------- */
+
 function handleKeydown(event) {
-  if (["INPUT", "SELECT", "TEXTAREA", "BUTTON"].includes(event.target.tagName)) return;
+  if (["INPUT", "SELECT", "TEXTAREA"].includes(event.target.tagName)) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
   if (event.key === "Escape") {
-    if (closePanels()) event.preventDefault();
+    if (closePanels() || closeSidebar()) event.preventDefault();
+    else hideChrome();
     return;
   }
-  if (event.key.toLowerCase() === "t") { togglePanel("toc"); event.preventDefault(); return; }
-  if (event.key.toLowerCase() === "s") { togglePanel("reader-settings"); event.preventDefault(); return; }
-  if (event.key.toLowerCase() === "f") { toggleFullscreen(); event.preventDefault(); return; }
-  if (["+", "=", "-", "_"].includes(event.key) && format === "epub") { adjustFont(event.key === "+" || event.key === "=" ? 5 : -5); event.preventDefault(); return; }
+  if (event.target.tagName === "BUTTON" && event.key === " ") return;
+  const key = event.key.toLowerCase();
+  if (key === "t") { toggleSidebar(); event.preventDefault(); return; }
+  if (key === "s") { togglePanel("font"); event.preventDefault(); return; }
+  if (key === "c") { togglePanel("color"); event.preventDefault(); return; }
+  if (key === "f") { toggleFullscreen(); event.preventDefault(); return; }
+  if (["+", "=", "-", "_"].includes(event.key)) { adjustZoom(event.key === "+" || event.key === "=" ? 1 : -1); event.preventDefault(); return; }
   if (["ArrowRight", "PageDown", " "].includes(event.key)) { navigate(1); event.preventDefault(); return; }
   if (["ArrowLeft", "PageUp"].includes(event.key)) { navigate(-1); event.preventDefault(); return; }
   if (event.key === "Home") { goToEdge(false); event.preventDefault(); return; }
@@ -254,6 +512,9 @@ function enableEPUBTextSelection(contentDocument) {
   contentDocument.head.append(style);
 }
 
+/* Swipes only. A tap raises touchend *and* a synthesised click, so toggling the
+   chrome from both cancelled itself out and left the bars unreachable on touch
+   — the click handler owns that job. */
 function bindTouchSurface(target) {
   let touch = null;
   target.addEventListener("touchstart", event => {
@@ -268,15 +529,14 @@ function bindTouchSurface(target) {
     const selection = target.getSelection?.() || target.ownerDocument?.getSelection?.();
     if (selection && !selection.isCollapsed) return;
     if (Math.abs(dx) > 52 && Math.abs(dx) > Math.abs(dy) * 1.35) navigate(dx < 0 ? 1 : -1);
-    else if (Math.abs(dx) < 16 && Math.abs(dy) < 16) setChromeVisible(!app.classList.contains("reader-chrome-hidden"));
   }, { passive: true });
   target.addEventListener("touchcancel", () => { touch = null; }, { passive: true });
 }
 
+/* ---------- navigation ---------- */
+
 async function navigate(direction) {
   closePanels();
-  setChromeVisible(true);
-  scheduleChromeHide();
   if (format === "epub") {
     if (direction > 0) await state.rendition.next();
     else await state.rendition.prev();
@@ -294,10 +554,42 @@ async function navigate(direction) {
   observe({ page: state.pdfPage });
 }
 
+async function navigateSection(direction) {
+  const target = state.activeTOC < 0
+    ? direction > 0 ? 0 : -1
+    : state.activeTOC + direction;
+  const entry = state.tocFlat[target];
+  if (!entry) return;
+  await goToTOC(entry);
+  state.activeTOC = target;
+  markActiveTOCIndex(target);
+}
+
+async function goToTOC(entry) {
+  closePanels();
+  if (format === "epub") {
+    await state.rendition.display(entry.item.href);
+    return;
+  }
+  const page = entry.number ?? await resolvePDFPage(entry.item.dest);
+  if (!page) return;
+  state.pdfPage = normalizePage(page, state.pdf.numPages, pdfUsesSpread());
+  await renderPDFPage();
+  observe({ page: state.pdfPage });
+}
+
+async function resolvePDFPage(dest) {
+  try {
+    const destination = typeof dest === "string" ? await state.pdf.getDestination(dest) : dest;
+    if (!destination?.[0]) return null;
+    return (await state.pdf.getPageIndex(destination[0])) + 1;
+  } catch {
+    return null;
+  }
+}
+
 async function seek(percent) {
   closePanels();
-  setChromeVisible(true);
-  scheduleChromeHide();
   if (format === "epub") {
     if (!state.locations || typeof state.locations.cfiFromPercentage !== "function") return;
     const cfi = state.locations.cfiFromPercentage(Math.min(Math.max(percent, 0), 1));
@@ -320,6 +612,117 @@ async function goToEdge(end) {
   observe({ page: state.pdfPage });
 }
 
+function applyJump(raw) {
+  const value = Number.parseFloat(String(raw).replace(/[^\d.]/g, ""));
+  if (!Number.isFinite(value)) return;
+  if (format === "pdf") void seek((normalizePage(Math.round(value), state.pdf.numPages, pdfUsesSpread()) - 1) / Math.max(state.pdf.numPages - 1, 1));
+  else void seek(Math.min(Math.max(value, 0), 100) / 100);
+}
+
+function jumpPlaceholder() {
+  return format === "pdf" ? String(state.pdfPage) : `${Math.round(state.percent * 100)}%`;
+}
+
+function pdfUsesSpread() {
+  return window.matchMedia("(min-width: 701px)").matches;
+}
+
+/* ---------- table of contents ---------- */
+
+function flattenTOC(items, depth = 0, out = []) {
+  for (const item of items || []) {
+    out.push({ item, depth, number: null });
+    if (item.subitems?.length) flattenTOC(item.subitems, depth + 1, out);
+  }
+  return out;
+}
+
+function renderTOC() {
+  const list = document.querySelector("#toc-list");
+  list.replaceChildren();
+  document.querySelector("#toc-empty").hidden = state.tocFlat.length > 0;
+  state.tocFlat.forEach((entry, index) => {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "reader-toc-item";
+    button.style.setProperty("--depth", String(entry.depth));
+    button.dataset.href = entry.item.href || "";
+    button.dataset.index = String(index);
+    const label = document.createElement("span");
+    label.textContent = entry.item.label?.trim() || entry.item.title?.trim() || "Section";
+    button.append(label);
+    if (entry.number) {
+      const number = document.createElement("small");
+      number.textContent = String(entry.number);
+      button.append(number);
+    }
+    button.addEventListener("click", async () => {
+      await goToTOC(entry);
+      state.activeTOC = index;
+      markActiveTOCIndex(index);
+      if (!app.classList.contains("sidebar-pinned")) closeSidebar();
+    });
+    li.append(button);
+    list.append(li);
+  });
+}
+
+function markActiveTOC(href) {
+  const key = tocKey(href);
+  const index = key ? state.tocFlat.findIndex(entry => tocKey(entry.item.href) === key) : -1;
+  state.activeTOC = index;
+  markActiveTOCIndex(index);
+}
+
+function markActivePDFTOC() {
+  if (format !== "pdf" || !state.tocFlat.length) return;
+  let index = -1;
+  state.tocFlat.forEach((entry, position) => {
+    if (entry.number && entry.number <= state.pdfPage) index = position;
+  });
+  state.activeTOC = index;
+  markActiveTOCIndex(index);
+}
+
+/* Mirrors readest's "current position" row: a synthetic entry slotted under the
+   active chapter so the sidebar shows how far into it the reader has come. */
+function markActiveTOCIndex(index) {
+  document.querySelector("#toc-current")?.remove();
+  let active = null;
+  for (const button of document.querySelectorAll(".reader-toc-item")) {
+    const matches = Number(button.dataset.index) === index;
+    button.classList.toggle("is-active", matches);
+    if (matches) active = button;
+  }
+  if (active) {
+    const row = document.createElement("li");
+    row.id = "toc-current";
+    row.className = "reader-toc-current";
+    row.style.setProperty("--depth", String((state.tocFlat[index]?.depth ?? 0) + 1));
+    row.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-book-open"></use></svg>';
+    const label = document.createElement("span");
+    label.textContent = "Current position";
+    const value = document.createElement("small");
+    value.textContent = format === "pdf" ? `p. ${state.pdfPage}` : `${Math.round(state.percent * 100)}%`;
+    row.append(label, value);
+    active.parentElement.after(row);
+  }
+  scrollActiveTOCIntoView();
+}
+
+function scrollActiveTOCIntoView() {
+  if (!isSidebarOpen()) return;
+  document.querySelector(".reader-toc-item.is-active")?.scrollIntoView({ block: "nearest" });
+}
+
+function currentTOCLabel() {
+  const entry = state.tocFlat[state.activeTOC];
+  return entry?.item.label?.trim() || entry?.item.title?.trim() || "";
+}
+
+/* ---------- progress readouts ---------- */
+
 function onEPUBRelocated(location) {
   state.currentLocation = location;
   const position = location?.start?.cfi;
@@ -327,89 +730,109 @@ function onEPUBRelocated(location) {
   const percent = percentFor(position);
   state.percent = Number.isFinite(percent) ? percent : state.savedPercent;
   observe({ position, percent: Number.isFinite(percent) ? percent : undefined });
-  updateEPUBProgress(location);
   markActiveTOC(location.start.href);
+  updateEPUBProgress();
 }
 
-function updateEPUBProgress(location) {
-  const percent = percentFor(location?.start?.cfi);
-  const displayPercent = Number.isFinite(percent) ? percent : state.savedPercent;
-  state.percent = displayPercent;
-  document.querySelector("#reader-progress").textContent = Number.isFinite(displayPercent) ? `${Math.round(displayPercent * 100)}% read` : "Reading";
-  document.querySelector("#reader-section").textContent = currentTOCLabel(location?.start?.href) || "Reading";
-  document.querySelector("#reader-chapter").textContent = currentTOCLabel(location?.start?.href) || "";
-  document.querySelector("#reader-progress-slider").value = String(Math.round(displayPercent * 1000) / 10);
+function updateEPUBProgress() {
+  const percent = state.percent;
+  const known = Number.isFinite(percent);
+  const chapter = currentTOCLabel();
+  setText("#reader-progress", known ? `${Math.round(percent * 100)}%` : "Reading");
+  setText("#reader-remaining", pagesLeftLabel());
+  setText("#reader-section", chapter || "Reading");
+  setText("#reader-footer-chapter", chapter);
+  setText("#detail-progress", known ? `${Math.round(percent * 100)}% read` : "Unknown");
+  setText("#detail-section", chapter || "—");
+  setSliders(percent);
+  syncJumpInputs();
 }
 
 function updatePDFProgress() {
   const percent = (state.pdfPage - 1) / Math.max(state.pdf.numPages - 1, 1);
   state.percent = percent;
   const lastPage = pdfUsesSpread() && state.pdfPage > 1 ? Math.min(state.pdfPage + 1, state.pdf.numPages) : state.pdfPage;
-  document.querySelector("#reader-progress").textContent = state.pdfPage === lastPage
-    ? `Page ${state.pdfPage} of ${state.pdf.numPages}`
-    : `Pages ${state.pdfPage}-${lastPage} of ${state.pdf.numPages}`;
-  document.querySelector("#reader-section").textContent = "PDF";
-  document.querySelector("#reader-chapter").textContent = "";
-  document.querySelector("#reader-progress-slider").value = String(Math.round(percent * 1000) / 10);
+  const label = state.pdfPage === lastPage ? String(state.pdfPage) : `${state.pdfPage}-${lastPage}`;
+  const remaining = Math.max(state.pdf.numPages - lastPage, 0);
+  setText("#reader-progress", `${label} / ${state.pdf.numPages}`);
+  setText("#reader-remaining", remaining ? `${remaining} page${remaining === 1 ? "" : "s"} left in book` : "Last page");
+  setText("#reader-section", currentTOCLabel() || `Page ${label}`);
+  setText("#reader-footer-chapter", currentTOCLabel());
+  setText("#detail-progress", `${Math.round(percent * 100)}% read`);
+  setText("#detail-section", `Page ${label} of ${state.pdf.numPages}`);
+  setSliders(percent);
+  syncJumpInputs();
 }
 
+/* The bands are covered while the footer is out, so the jump input and the
+   slider bubble double as the live readout during a scrub — the role
+   readest gives its PageJumpInput. Returns the label for the bubble. */
 function previewProgress(percent) {
   if (format !== "pdf") {
-    document.querySelector("#reader-progress").textContent = `${Math.round(percent * 100)}% read`;
-    return;
+    const label = `${Math.round(percent * 100)}%`;
+    setText("#reader-progress", label);
+    setJumpInputs(label);
+    return label;
   }
   const page = normalizePage(Math.round(percent * Math.max(state.pdf.numPages - 1, 1)) + 1, state.pdf.numPages, pdfUsesSpread());
   const lastPage = pdfUsesSpread() && page > 1 ? Math.min(page + 1, state.pdf.numPages) : page;
-  document.querySelector("#reader-progress").textContent = page === lastPage
-    ? `Page ${page} of ${state.pdf.numPages}`
-    : `Pages ${page}-${lastPage} of ${state.pdf.numPages}`;
+  setText("#reader-progress", `${page === lastPage ? page : `${page}-${lastPage}`} / ${state.pdf.numPages}`);
+  setJumpInputs(String(page));
+  return String(page);
 }
 
-function pdfUsesSpread() {
-  return window.matchMedia("(min-width: 701px)").matches;
-}
-
-function renderTOC(items, activate) {
-  const list = document.querySelector("#toc-list");
-  list.replaceChildren();
-  appendTOCItems(list, items, activate);
-}
-
-function appendTOCItems(parent, items, activate) {
-  for (const item of items || []) {
-    const li = document.createElement("li");
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "reader-toc-item";
-    button.textContent = item.label || item.title || "Section";
-    button.dataset.href = item.href || "";
-    button.addEventListener("click", async () => { await activate(item); closePanels(); setChromeVisible(true); scheduleChromeHide(); });
-    li.append(button);
-    if (item.subitems?.length) {
-      const nested = document.createElement("ol");
-      appendTOCItems(nested, item.subitems, activate);
-      li.append(nested);
-    }
-    parent.append(li);
+function setSliders(percent) {
+  const value = String(Math.round((Number.isFinite(percent) ? percent : 0) * 1000) / 10);
+  for (const slider of sliders()) {
+    if (document.activeElement === slider) continue;
+    slider.value = value;
+    syncRange(slider, jumpPlaceholder());
   }
 }
 
-function markActiveTOC(href) {
-  const key = tocKey(href);
-  let active = null;
-  for (const button of document.querySelectorAll(".reader-toc-item")) {
-    const matches = key && tocKey(button.dataset.href) === key;
-    button.classList.toggle("is-active", matches);
-    if (matches) active = button;
-  }
-  active?.scrollIntoView({ block: "nearest" });
+/* Drives readest's pill slider: the fill width, the floating bubble position
+   and, unless the bubble carries an icon, the value it shows. */
+function syncRange(input, label) {
+  const wrap = input.closest("[data-range]");
+  if (!wrap) return;
+  const min = Number(input.min);
+  const max = Number(input.max);
+  const position = max > min ? ((Number(input.value) - min) / (max - min)) * 100 : 0;
+  wrap.style.setProperty("--pos", String(Math.min(Math.max(position, 0), 100)));
+  const bubble = wrap.querySelector(".reader-range-bubble");
+  if (!bubble || bubble.classList.contains("reader-range-bubble-icon")) return;
+  bubble.textContent = label ?? `${Math.round(Number(input.value))}${wrap.dataset.bubbleSuffix || ""}`;
 }
 
-function currentTOCLabel(href) {
-  const key = tocKey(href);
-  if (!key) return "";
-  const button = [...document.querySelectorAll(".reader-toc-item")].find(item => tocKey(item.dataset.href) === key);
-  return button?.textContent || "";
+function syncRanges() {
+  for (const wrap of document.querySelectorAll("[data-range]")) {
+    const input = wrap.querySelector('input[type="range"]');
+    if (input) syncRange(input, input.id.startsWith("reader-progress-slider") ? jumpPlaceholder() : undefined);
+  }
+}
+
+function syncJumpInputs() {
+  setJumpInputs(jumpPlaceholder());
+}
+
+function setJumpInputs(value) {
+  for (const jump of jumpInputs()) {
+    if (document.activeElement !== jump) jump.value = value;
+  }
+}
+
+/* readest's "N pages left in chapter". epub.js reports the page within the
+   current section on every relocate; scrolled flow has no page count, so the
+   percentage remaining stands in. */
+function pagesLeftLabel() {
+  const displayed = state.currentLocation?.start?.displayed;
+  if (displayed?.total > 0 && displayed.page > 0) {
+    const left = Math.max(displayed.total - displayed.page, 0);
+    if (!left) return "Last page in chapter";
+    return `${left} page${left === 1 ? "" : "s"} left in chapter`;
+  }
+  if (!Number.isFinite(state.percent)) return "";
+  return `${Math.max(Math.round((1 - state.percent) * 100), 0)}% left in book`;
 }
 
 function percentFor(cfi) {
@@ -417,6 +840,8 @@ function percentFor(cfi) {
   const value = state.locations.percentageFromCfi(cfi);
   return Number.isFinite(value) ? value : undefined;
 }
+
+/* ---------- appearance ---------- */
 
 function applyEPUBStyles() {
   if (format !== "epub" || !state.rendition) return;
@@ -427,8 +852,10 @@ function applyEPUBStyles() {
     html: { height: "100%" },
     body: {
       "box-sizing": "border-box",
-      color: dark ? "#f5f5f4" : "#1c1917",
-      background: dark ? "#0c0a09" : "#fafaf9",
+      color: dark ? "#f2f0ea" : "#242321",
+      /* Same value as --canvas: the page has to be one continuous surface with
+         the stage around it, or the iframe box shows as a seam. */
+      background: dark ? "#191816" : "#f7f6f3",
       "min-height": "100%",
       "line-height": String(preferences.lineHeight),
       "max-width": `${preferences.textWidth}rem`,
@@ -442,6 +869,7 @@ async function setEPUBFlow(flow) {
   if (format !== "epub" || !state.rendition || !["paginated", "scrolled"].includes(flow)) return;
   state.preferences.flow = flow;
   savePreferences();
+  updateSettingsUI();
   try {
     state.rendition.flow(flow === "scrolled" ? "scrolled-doc" : "paginated");
     await state.rendition.display(state.currentLocation?.start?.cfi || undefined);
@@ -458,8 +886,7 @@ function updatePreference(key, value, apply) {
 }
 
 function adjustFont(delta) {
-  const value = Math.min(Math.max(state.preferences.fontSize + delta, 75), 180);
-  updatePreference("fontSize", value, applyEPUBStyles);
+  updatePreference("fontSize", Math.min(Math.max(state.preferences.fontSize + delta, 75), 180), applyEPUBStyles);
 }
 
 function adjustZoom(direction) {
@@ -485,22 +912,22 @@ function resetPreferences() {
 function updateSettingsUI() {
   const preferences = state.preferences;
   setValue("#font-size", preferences.fontSize);
-  setValue("#font-size-value", `${preferences.fontSize}%`, true);
   setValue("#line-height", preferences.lineHeight);
-  setValue("#line-height-value", preferences.lineHeight.toFixed(1), true);
   setValue("#text-width", preferences.textWidth);
-  setValue("#text-width-value", `${preferences.textWidth}rem`, true);
-  setValue("#reader-flow", preferences.flow);
   setValue("#pdf-zoom", Math.round(preferences.pdfZoom * 100));
-  setValue("#pdf-zoom-value", `${Math.round(preferences.pdfZoom * 100)}%`, true);
+  for (const button of document.querySelectorAll("[data-flow]")) button.classList.toggle("is-active", button.dataset.flow === preferences.flow);
   for (const button of document.querySelectorAll("[data-pdf-tone]")) button.classList.toggle("is-active", button.dataset.pdfTone === preferences.pdfTone);
+  syncRanges();
 }
 
-function setValue(selector, value, text = false) {
+function setValue(selector, value) {
   const element = document.querySelector(selector);
-  if (!element) return;
-  if (text) element.textContent = value;
-  else element.value = value;
+  if (element) element.value = value;
+}
+
+function setText(selector, value) {
+  const element = document.querySelector(selector);
+  if (element) element.textContent = value;
 }
 
 function setPDFTone(tone, persist = true) {
@@ -511,64 +938,18 @@ function setPDFTone(tone, persist = true) {
   updateSettingsUI();
 }
 
-function toggleTheme() {
-  const dark = document.documentElement.classList.toggle("dark");
+function setTheme(dark) {
+  document.documentElement.classList.toggle("dark", dark);
   storageSet("bookshelf:v1:theme", dark ? "dark" : "light");
   applyEPUBStyles();
-  updateThemeButton();
+  updateThemeButtons();
 }
 
-function updateThemeButton() {
+function updateThemeButtons() {
   const dark = document.documentElement.classList.contains("dark");
-  const button = document.querySelector("#theme");
-  if (!button) return;
-  button.textContent = dark ? "Light" : "Dark";
-  button.setAttribute("aria-label", dark ? "Switch to light theme" : "Switch to dark theme");
-  button.title = dark ? "Switch to light theme" : "Switch to dark theme";
-}
-
-function togglePanel(idToToggle) {
-  const panel = document.querySelector(`#${idToToggle}`);
-  if (!panel) return false;
-  const willOpen = panel.hidden;
-  closePanels();
-  if (!willOpen) return false;
-  panel.hidden = false;
-  document.querySelector("#reader-backdrop").hidden = false;
-  document.querySelector("#reader-app").classList.add("reader-panel-open");
-  document.querySelector(`#${idToToggle === "toc" ? "toc-toggle" : "settings-toggle"}`).setAttribute("aria-expanded", "true");
-  setChromeVisible(true);
-  panel.querySelector("button, input, select")?.focus();
-  return true;
-}
-
-function closePanels() {
-  const toc = document.querySelector("#toc");
-  const settings = document.querySelector("#reader-settings");
-  const wasOpen = !toc.hidden || !settings.hidden;
-  toc.hidden = true;
-  settings.hidden = true;
-  document.querySelector("#reader-backdrop").hidden = true;
-  document.querySelector("#reader-app").classList.remove("reader-panel-open");
-  document.querySelector("#toc-toggle").setAttribute("aria-expanded", "false");
-  document.querySelector("#settings-toggle").setAttribute("aria-expanded", "false");
-  if (wasOpen) scheduleChromeHide();
-  return wasOpen;
-}
-
-function setChromeVisible(visible) {
-  app.classList.toggle("reader-chrome-hidden", !visible);
-  if (visible) scheduleChromeHide();
-}
-
-function toggleChrome() {
-  if (!closePanels()) setChromeVisible(app.classList.contains("reader-chrome-hidden"));
-}
-
-function scheduleChromeHide() {
-  clearTimeout(state.hideTimer);
-  if (app.classList.contains("reader-panel-open")) return;
-  state.hideTimer = setTimeout(() => setChromeVisible(false), 3600);
+  for (const button of document.querySelectorAll("[data-theme-mode]")) {
+    button.classList.toggle("is-active", (button.dataset.themeMode === "dark") === dark);
+  }
 }
 
 async function toggleFullscreen() {
@@ -584,6 +965,41 @@ async function toggleFullscreen() {
     console.warn("Could not change fullscreen state", error);
   }
 }
+
+function updateFullscreenButton() {
+  const active = Boolean(document.fullscreenElement || document.webkitFullscreenElement);
+  const label = active ? "Exit fullscreen" : "Enter fullscreen";
+  for (const button of document.querySelectorAll('#fullscreen, [data-footer-tab="fullscreen"]')) {
+    button.querySelector("use").setAttribute("href", active ? "#i-contract" : "#i-expand");
+    button.title = active ? "Exit fullscreen (F)" : "Fullscreen (F)";
+    button.setAttribute("aria-label", label);
+  }
+}
+
+/* The stage changes width when the sidebar is pinned or resized, not just when
+   the window is — epub.js and the PDF canvas both need a nudge either way. */
+function observeStage() {
+  const stage = document.querySelector("#reader-stage");
+  new ResizeObserver(() => {
+    if (!state.ready) return;
+    clearTimeout(state.resizeTimer);
+    state.resizeTimer = setTimeout(handleStageResize, 150);
+  }).observe(stage);
+}
+
+function handleStageResize() {
+  if (format === "pdf" && state.pdf) {
+    renderPDFPage().catch(error => console.warn("Could not resize PDF", error));
+    return;
+  }
+  try {
+    state.rendition?.resize();
+  } catch (error) {
+    console.warn("Could not resize the book", error);
+  }
+}
+
+/* ---------- persistence ---------- */
 
 function observe(value) {
   state.observed = value;
@@ -625,20 +1041,22 @@ async function save(beacon = false) {
 
 function setPhase(phase) {
   state.phase = phase;
+  const label = phase[0].toUpperCase() + phase.slice(1);
   const sync = document.querySelector("#sync-state");
-  if (!sync) return;
-  sync.textContent = phase[0].toUpperCase() + phase.slice(1);
-  sync.dataset.state = phase;
+  if (sync) {
+    sync.dataset.state = phase;
+    sync.querySelector(".sync-label").textContent = label;
+    sync.title = `Sync: ${label}`;
+  }
+  setText("#detail-sync", label);
 }
 
 function setProgressMessage(message) {
-  const progress = document.querySelector("#reader-progress");
-  if (progress) progress.textContent = message;
+  setText("#reader-progress", message);
 }
 
 function setLoading(message) {
-  const loading = document.querySelector("#reader-loading-text");
-  if (loading) loading.textContent = message;
+  setText("#reader-loading-text", message);
 }
 
 function savePreferences() { storageSet(preferenceKey, JSON.stringify(state.preferences)); }
@@ -660,6 +1078,14 @@ function loadPreferences() {
     pdfZoom: boundedNumber(stored.pdfZoom, defaults.pdfZoom, 0.5, 3),
     pdfTone: pdfTones.includes(stored.pdfTone) ? stored.pdfTone : defaults.pdfTone,
   };
+}
+
+function saveLayout() { storageSet(layoutKey, JSON.stringify(state.layout)); }
+
+function loadLayout() {
+  let stored = {};
+  try { stored = JSON.parse(storageGet(layoutKey) || "{}") || {}; } catch { stored = {}; }
+  return { width: boundedNumber(stored.width, 20, 15, 34), pinned: stored.pinned === true };
 }
 
 function storageGet(key) { try { return localStorage.getItem(key); } catch { return null; } }

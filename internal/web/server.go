@@ -816,10 +816,12 @@ func (s *Server) readerPage(w http.ResponseWriter, r *http.Request) {
 	view := struct {
 		ID        int64
 		Title     string
+		Author    string
 		Format    string
 		FileHash  string
 		PageCount int
-	}{book.ID, book.Title, book.Format, book.FileHash, book.PageCount}
+		HasCover  bool
+	}{book.ID, book.Title, book.Author, book.Format, book.FileHash, book.PageCount, book.CoverPath != ""}
 	s.render(w, "reader", map[string]any{"Book": view, "CSRF": s.dep.Auth.CSRFToken(currentSession(r))})
 }
 func (s *Server) bookFile(w http.ResponseWriter, r *http.Request)  { s.serveBookData(w, r, false) }
