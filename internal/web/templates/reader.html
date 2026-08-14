@@ -23,6 +23,8 @@
     <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
     <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M14.5 5l-7 7 7 7"/></symbol>
     <symbol id="i-pin" viewBox="0 0 24 24"><path d="M9.5 3.5h5l-.7 5.2 2.7 2.8H7.5l2.7-2.8z"/><path d="M12 11.5V20"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M6.5 4.5h11v15l-5.5-4-5.5 4z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 6.5h15M9.5 6.5V4.8h5v1.7M7 6.5l.9 12.2a1.5 1.5 0 0 0 1.5 1.3h5.2a1.5 1.5 0 0 0 1.5-1.3L17 6.5"/></symbol>
     <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></symbol>
     <symbol id="i-contract" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></symbol>
     <symbol id="i-chevron-left" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
@@ -68,12 +70,18 @@
         </div>
       </div>
 
-      <div id="sidebar-toc" class="reader-sidebar-body" role="tabpanel" aria-label="Table of contents">
+      <div id="sidebar-toc" class="reader-sidebar-body" role="tabpanel" data-sidebar-panel="toc" aria-label="Table of contents">
         <ol id="toc-list"></ol>
         <p id="toc-empty" class="reader-sidebar-empty" hidden>This book has no table of contents.</p>
       </div>
 
-      <div id="sidebar-info" class="reader-sidebar-body" role="tabpanel" aria-label="Book details" hidden>
+      <div id="sidebar-bookmarks" class="reader-sidebar-body" role="tabpanel" data-sidebar-panel="bookmarks" aria-label="Bookmarks" hidden>
+        <ol id="bookmark-list"></ol>
+        <p id="bookmark-empty" class="reader-sidebar-empty" hidden>No bookmarks yet. Save the spot you are reading to find it again later.</p>
+        <button id="bookmark-add" class="reader-list-action" type="button">Bookmark this spot</button>
+      </div>
+
+      <div id="sidebar-info" class="reader-sidebar-body" role="tabpanel" data-sidebar-panel="info" aria-label="Book details" hidden>
         <dl class="reader-detail-list">
           <div><dt>Format</dt><dd>{{.Book.Format}}</dd></div>
           <div><dt>Author</dt><dd>{{if .Book.Author}}{{.Book.Author}}{{else}}Unknown{{end}}</dd></div>
@@ -89,6 +97,7 @@
 
       <div class="reader-sidebar-tabs" role="tablist" aria-label="Sidebar sections">
         <button class="reader-sidebar-tab is-active" type="button" role="tab" data-sidebar-tab="toc" aria-selected="true" aria-controls="sidebar-toc" title="Contents" aria-label="Contents"><svg class="icon"><use href="#i-list"></use></svg></button>
+        <button class="reader-sidebar-tab" type="button" role="tab" data-sidebar-tab="bookmarks" aria-selected="false" aria-controls="sidebar-bookmarks" title="Bookmarks" aria-label="Bookmarks"><svg class="icon"><use href="#i-bookmark"></use></svg></button>
         <button class="reader-sidebar-tab" type="button" role="tab" data-sidebar-tab="info" aria-selected="false" aria-controls="sidebar-info" title="Details" aria-label="Details"><svg class="icon"><use href="#i-info"></use></svg></button>
       </div>
 
@@ -107,6 +116,7 @@
         <h1 class="reader-titlebar">{{.Book.Title}}</h1>
         <div class="reader-bar-group reader-bar-group-end">
           <span id="sync-state" class="sync-state" role="status" data-state="booting" title="Sync state"><span class="sync-dot" aria-hidden="true"></span><span class="sync-label">Booting</span></span>
+          <button id="bookmark-toggle" class="reader-round" type="button" aria-pressed="false" aria-label="Bookmark this spot" title="Bookmark this spot (B)"><svg class="icon"><use href="#i-bookmark"></use></svg></button>
           <button id="settings-toggle" class="reader-round" type="button" aria-expanded="false" aria-controls="panel-font" aria-label="Font and layout" title="Font and layout (S)"><svg class="icon"><use href="#i-type"></use></svg></button>
           <button id="color-toggle" class="reader-round" type="button" aria-expanded="false" aria-controls="panel-color" aria-label="Colour and theme" title="Colour and theme (C)"><svg class="icon"><use href="#i-palette"></use></svg></button>
           <button id="fullscreen" class="reader-round reader-desktop-only" type="button" aria-label="Enter fullscreen" title="Fullscreen (F)"><svg class="icon"><use href="#i-expand"></use></svg></button>

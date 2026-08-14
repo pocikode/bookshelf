@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { boundedNumber, columnCount, deviceLabel, normalizePDFPage, tocKey } from "./reader-utils.js";
+import { bookmarkLabel, boundedNumber, columnCount, deviceLabel, normalizePDFPage, tocKey } from "./reader-utils.js";
 
 describe("boundedNumber", () => {
   test("accepts bounds and rejects invalid values", () => {
@@ -71,4 +71,24 @@ describe("deviceLabel", () => {
     expect(deviceLabel({ brands: [{ brand: "Chromium" }], platform: "Linux" })).toBe("Chrome on Linux");
   });
 
+});
+
+describe("bookmarkLabel", () => {
+  test("prefers the chapter title when the book has one", () => {
+    expect(bookmarkLabel({ format: "epub", chapter: "  Chapter Two  ", percent: 0.5 })).toBe("Chapter Two");
+    expect(bookmarkLabel({ format: "pdf", chapter: "Appendix", page: 12 })).toBe("Appendix");
+  });
+
+  test("falls back to the page for PDFs and the percentage for EPUBs", () => {
+    expect(bookmarkLabel({ format: "pdf", page: 12 })).toBe("Page 12");
+    expect(bookmarkLabel({ format: "pdf", page: 0 })).toBe("Page 1");
+    expect(bookmarkLabel({ format: "epub", percent: 0.426 })).toBe("43%");
+    expect(bookmarkLabel({ format: "epub" })).toBe("0%");
+    expect(bookmarkLabel({ format: "epub", percent: Number.NaN })).toBe("0%");
+    expect(bookmarkLabel()).toBe("0%");
+  });
+
+  test("truncates an overlong chapter title", () => {
+    expect(bookmarkLabel({ format: "epub", chapter: "x".repeat(250) })).toHaveLength(200);
+  });
 });

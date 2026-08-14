@@ -20,6 +20,16 @@ export function tocKey(value) {
   return String(value || "").split("#")[0].split("?")[0].split("/").pop();
 }
 
+/* A bookmark names itself after wherever it was dropped: the chapter if the book
+   has one, otherwise the page or the percentage the reader can see on the bar. */
+export function bookmarkLabel({ format, chapter = "", page = 0, percent = 0 } = {}) {
+  const title = String(chapter || "").trim();
+  if (title) return title.slice(0, 200);
+  if (format === "pdf") return `Page ${Math.max(Math.round(Number(page) || 1), 1)}`;
+  const value = Number(percent);
+  return `${Math.round((Number.isFinite(value) ? value : 0) * 100)}%`;
+}
+
 export function deviceLabel({ userAgent = "", brands = [], platform = "" } = {}) {
   const brandString = brands.map(item => item.brand).join(" ");
   const browser = /Edge|Microsoft Edge/i.test(brandString) || /Edg\//.test(userAgent) ? "Edge"

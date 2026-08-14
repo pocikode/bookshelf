@@ -1,6 +1,6 @@
 import ePub from "epubjs";
 import * as pdfjsLib from "pdfjs-dist";
-import { boundedNumber, columnCount, deviceLabel as formatDeviceLabel, normalizePDFPage as normalizePage, tocKey } from "./reader-utils.js";
+import { bookmarkLabel, boundedNumber, columnCount, deviceLabel as formatDeviceLabel, normalizePDFPage as normalizePage, tocKey } from "./reader-utils.js";
 
 const app = document.querySelector("#reader-app");
 const id = Number(app?.dataset.bookId);
@@ -33,6 +33,7 @@ const state = {
   tocItems: [],
   tocFlat: [],
   activeTOC: -1,
+  bookmarks: [],
   percent: 0,
   savedPercent: 0,
   panel: "",
@@ -55,6 +56,7 @@ async function boot() {
   if (format === "epub") await bootEPUB(saved);
   else await bootPDF(saved);
   installControls();
+  void loadBookmarks();
   app.classList.remove("is-loading");
   document.querySelector("#reader-loading")?.remove();
   state.ready = true;
@@ -244,6 +246,8 @@ function installControls() {
   for (const tab of document.querySelectorAll("[data-sidebar-tab]")) tab.addEventListener("click", () => selectSidebarTab(tab.dataset.sidebarTab));
   installSidebarResize();
 
+  on("#bookmark-toggle", "click", toggleBookmark);
+  on("#bookmark-add", "click", toggleBookmark);
   on("#settings-toggle", "click", () => togglePanel("font"));
   on("#color-toggle", "click", () => togglePanel("color"));
   on("#fullscreen", "click", toggleFullscreen);
@@ -413,8 +417,7 @@ function selectSidebarTab(name) {
     tab.classList.toggle("is-active", active);
     tab.setAttribute("aria-selected", String(active));
   }
-  document.querySelector("#sidebar-toc").hidden = name !== "toc";
-  document.querySelector("#sidebar-info").hidden = name !== "info";
+  for (const panel of document.querySelectorAll("[data-sidebar-panel]")) panel.hidden = panel.dataset.sidebarPanel !== name;
 }
 
 function applyLayout() {
@@ -512,6 +515,7 @@ function handleKeydown(event) {
   if (key === "s") { togglePanel("font"); event.preventDefault(); return; }
   if (key === "c") { togglePanel("color"); event.preventDefault(); return; }
   if (key === "f") { toggleFullscreen(); event.preventDefault(); return; }
+  if (key === "b") { void toggleBookmark(); event.preventDefault(); return; }
   if (["+", "=", "-", "_"].includes(event.key)) { adjustZoom(event.key === "+" || event.key === "=" ? 1 : -1); event.preventDefault(); return; }
   if (["ArrowRight", "PageDown", " "].includes(event.key)) { navigate(1); event.preventDefault(); return; }
   if (["ArrowLeft", "PageUp"].includes(event.key)) { navigate(-1); event.preventDefault(); return; }
@@ -807,6 +811,137 @@ function currentTOCLabel() {
   return entry?.item.label?.trim() || entry?.item.title?.trim() || "";
 }
 
+/* ---------- bookmarks ---------- */
+
+const bookmarksEndpoint = `/api/books/${id}/bookmarks`;
+
+async function loadBookmarks() {
+  try {
+    const response = await fetch(bookmarksEndpoint, { credentials: "same-origin" });
+    if (!response.ok) throw new Error(`Bookmarks unavailable (${response.status})`);
+    state.bookmarks = await response.json();
+  } catch (error) {
+    /* A book that opens without its bookmarks is still readable, so this stays
+       out of the fatal path that boot() takes. */
+    console.warn("Could not load bookmarks", error);
+    state.bookmarks = [];
+  }
+  renderBookmarks();
+  updateBookmarkButton();
+}
+
+/* The spot the reader is looking at, in the same shape the API stores: a CFI for
+   EPUB, a page for PDF. */
+function currentBookmark() {
+  const chapter = currentTOCLabel();
+  if (format === "pdf") {
+    if (!state.pdf) return null;
+    return { position: String(state.pdfPage), page: state.pdfPage, percent: state.percent, label: bookmarkLabel({ format, chapter, page: state.pdfPage }) };
+  }
+  const position = state.currentLocation?.start?.cfi;
+  if (!position) return null;
+  const percent = Number.isFinite(state.percent) ? state.percent : 0;
+  return { position, page: 0, percent, label: bookmarkLabel({ format, chapter, percent }) };
+}
+
+function findBookmarkAt(position) {
+  return state.bookmarks.find(item => item.position === position) || null;
+}
+
+async function toggleBookmark() {
+  const target = currentBookmark();
+  if (!target) return;
+  const existing = findBookmarkAt(target.position);
+  try {
+    if (existing) {
+      const response = await fetch(`${bookmarksEndpoint}/${existing.id}`, { method: "DELETE", credentials: "same-origin", headers: { "X-CSRF-Token": csrf } });
+      if (!response.ok && response.status !== 404) throw new Error(`Could not remove bookmark (${response.status})`);
+      state.bookmarks = state.bookmarks.filter(item => item.id !== existing.id);
+    } else {
+      const response = await fetch(bookmarksEndpoint, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf },
+        body: JSON.stringify({ position: target.position, page: target.page, percent: target.percent, label: target.label }),
+      });
+      if (!response.ok) throw new Error(`Could not save bookmark (${response.status})`);
+      state.bookmarks = [...state.bookmarks, await response.json()];
+    }
+  } catch (error) {
+    console.warn(error);
+    return;
+  }
+  renderBookmarks();
+  updateBookmarkButton();
+}
+
+async function removeBookmark(bookmark) {
+  try {
+    const response = await fetch(`${bookmarksEndpoint}/${bookmark.id}`, { method: "DELETE", credentials: "same-origin", headers: { "X-CSRF-Token": csrf } });
+    if (!response.ok && response.status !== 404) throw new Error(`Could not remove bookmark (${response.status})`);
+  } catch (error) {
+    console.warn(error);
+    return;
+  }
+  state.bookmarks = state.bookmarks.filter(item => item.id !== bookmark.id);
+  renderBookmarks();
+  updateBookmarkButton();
+}
+
+function renderBookmarks() {
+  const list = document.querySelector("#bookmark-list");
+  if (!list) return;
+  list.replaceChildren();
+  document.querySelector("#bookmark-empty").hidden = state.bookmarks.length > 0;
+  for (const bookmark of state.bookmarks) {
+    const li = document.createElement("li");
+    li.className = "reader-bookmark-row";
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "reader-bookmark-item";
+    const label = document.createElement("span");
+    label.textContent = bookmark.label;
+    const meta = document.createElement("small");
+    meta.textContent = format === "pdf" ? `p. ${bookmark.page}` : `${Math.round((bookmark.percent || 0) * 100)}%`;
+    button.append(label, meta);
+    button.addEventListener("click", async () => {
+      await goToBookmark(bookmark);
+      if (!app.classList.contains("sidebar-pinned")) closeSidebar();
+    });
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "reader-bookmark-remove";
+    remove.title = "Remove bookmark";
+    remove.setAttribute("aria-label", `Remove bookmark ${bookmark.label}`);
+    remove.innerHTML = '<svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg>';
+    remove.addEventListener("click", () => void removeBookmark(bookmark));
+    li.append(button, remove);
+    list.append(li);
+  }
+}
+
+async function goToBookmark(bookmark) {
+  closePanels();
+  if (format === "epub") {
+    await state.rendition.display(bookmark.position);
+    return;
+  }
+  state.pdfPage = normalizePage(bookmark.page || Number(bookmark.position) || 1, state.pdf.numPages, pdfUsesSpread());
+  await renderPDFPage();
+  observe({ page: state.pdfPage });
+}
+
+function updateBookmarkButton() {
+  const button = document.querySelector("#bookmark-toggle");
+  if (!button) return;
+  const target = currentBookmark();
+  const marked = Boolean(target && findBookmarkAt(target.position));
+  button.setAttribute("aria-pressed", String(marked));
+  button.title = marked ? "Remove this bookmark (B)" : "Bookmark this spot (B)";
+  button.setAttribute("aria-label", marked ? "Remove this bookmark" : "Bookmark this spot");
+  setText("#bookmark-add", marked ? "Remove this bookmark" : "Bookmark this spot");
+}
+
 /* ---------- progress readouts ---------- */
 
 function onEPUBRelocated(location) {
@@ -832,6 +967,7 @@ function updateEPUBProgress() {
   setText("#detail-section", chapter || "—");
   setSliders(percent);
   syncJumpInputs();
+  updateBookmarkButton();
 }
 
 function updatePDFProgress() {
@@ -848,6 +984,7 @@ function updatePDFProgress() {
   setText("#detail-section", `Page ${label} of ${state.pdf.numPages}`);
   setSliders(percent);
   syncJumpInputs();
+  updateBookmarkButton();
 }
 
 /* The bands are covered while the footer is out, so the jump input and the

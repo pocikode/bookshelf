@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"pocikode/bookshelf/internal/auth"
+	"pocikode/bookshelf/internal/bookmark"
 	"pocikode/bookshelf/internal/config"
 	"pocikode/bookshelf/internal/database"
 	"pocikode/bookshelf/internal/library"
@@ -75,7 +76,7 @@ func newIntegrationApp(t *testing.T) *integrationApp {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewServer(Dependencies{Config: cfg, Repository: repo, Auth: authSvc, Limiter: ratelimit.New(nil), Library: library.New(repo, dir, cfg.MaxUploadBytes), Progress: progress.New(repo), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	handler, err := NewServer(Dependencies{Config: cfg, Repository: repo, Auth: authSvc, Limiter: ratelimit.New(nil), Library: library.New(repo, dir, cfg.MaxUploadBytes), Progress: progress.New(repo), Bookmark: bookmark.New(repo), Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,6 +231,89 @@ func TestProgressCSRFAndServerDerivedPDFPercent(t *testing.T) {
 	}
 	if p.Page != 3 || p.Percent != .3 {
 		t.Fatalf("progress=%+v", p)
+	}
+}
+
+func TestBookmarksAreScopedToTheirUser(t *testing.T) {
+	app := newIntegrationApp(t)
+	defer app.dbClose()
+	path := "/api/books/" + stringID(app.book.ID) + "/bookmarks"
+	send := func(method, target, body, token string, session auth.Session) *httptest.ResponseRecorder {
+		var reader io.Reader
+		if body != "" {
+			reader = strings.NewReader(body)
+		}
+		req := httptest.NewRequest(method, target, reader)
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("X-CSRF-Token", token)
+		}
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: session.Token})
+		rec := httptest.NewRecorder()
+		app.handler.ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := send(http.MethodPost, path, `{"page":4}`, "", app.session); rec.Code != http.StatusForbidden {
+		t.Fatalf("create without csrf=%d %s", rec.Code, rec.Body.String())
+	}
+	created := send(http.MethodPost, path, `{"page":4}`, app.csrf, app.session)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create=%d %s", created.Code, created.Body.String())
+	}
+	var saved database.Bookmark
+	if err := json.Unmarshal(created.Body.Bytes(), &saved); err != nil {
+		t.Fatal(err)
+	}
+	/* The PDF page count is 10, so the percentage has to come from the server
+	   rather than from anything the reader sent. */
+	if saved.Page != 4 || saved.Position != "4" || saved.Percent != .4 || saved.Label != "Page 4" {
+		t.Fatalf("saved=%+v", saved)
+	}
+	if rec := send(http.MethodPost, path, `{"page":99}`, app.csrf, app.session); rec.Code != http.StatusBadRequest {
+		t.Fatalf("out of range page=%d %s", rec.Code, rec.Body.String())
+	}
+	/* Re-bookmarking the same page renames it in place instead of piling up. */
+	again := send(http.MethodPost, path, `{"page":4,"label":"Start of chapter 2"}`, app.csrf, app.session)
+	if again.Code != http.StatusCreated {
+		t.Fatalf("repeat create=%d %s", again.Code, again.Body.String())
+	}
+	list := send(http.MethodGet, path, "", "", app.session)
+	var bookmarks []database.Bookmark
+	if err := json.Unmarshal(list.Body.Bytes(), &bookmarks); err != nil {
+		t.Fatal(err)
+	}
+	if list.Code != http.StatusOK || len(bookmarks) != 1 || bookmarks[0].Label != "Start of chapter 2" {
+		t.Fatalf("list=%d %+v", list.Code, bookmarks)
+	}
+
+	other, err := app.repo.CreateUser(context.Background(), "bookmark-other", passwordDigest("another password"), "user", time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherSession, err := app.auth.CreateForUser(context.Background(), other.ID, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherList := send(http.MethodGet, path, "", "", otherSession)
+	if otherList.Code != http.StatusOK || strings.TrimSpace(otherList.Body.String()) != "[]" {
+		t.Fatalf("other user list=%d %s", otherList.Code, otherList.Body.String())
+	}
+	if rec := send(http.MethodDelete, path+"/"+stringID(saved.ID), "", app.auth.CSRFToken(otherSession), otherSession); rec.Code != http.StatusNotFound {
+		t.Fatalf("other user delete=%d %s", rec.Code, rec.Body.String())
+	}
+
+	if rec := send(http.MethodDelete, path+"/0", "", app.csrf, app.session); rec.Code != http.StatusNotFound {
+		t.Fatalf("invalid bookmark id=%d", rec.Code)
+	}
+	if rec := send(http.MethodDelete, path+"/"+stringID(saved.ID), "", "", app.session); rec.Code != http.StatusForbidden {
+		t.Fatalf("delete without csrf=%d", rec.Code)
+	}
+	if rec := send(http.MethodDelete, path+"/"+stringID(saved.ID), "", app.csrf, app.session); rec.Code != http.StatusNoContent {
+		t.Fatalf("delete=%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := send(http.MethodGet, "/api/books/999/bookmarks", "", "", app.session); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing book=%d", rec.Code)
 	}
 }
 

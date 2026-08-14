@@ -209,6 +209,67 @@ func TestRepositoryBookVisibilityListingAndProgress(t *testing.T) {
 	}
 }
 
+func TestRepositoryBookmarks(t *testing.T) {
+	ctx := context.Background()
+	repo := testRepository(t)
+	now := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	reader, err := repo.CreateUser(ctx, "marker", "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "user", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	book := Book{Title: "Marked", Category: "Tests", Format: "epub", FileHash: "hash-bookmarks", FilePath: "books/hash.epub", FileSize: 12, CreatedAt: now}
+	if err := repo.InsertBook(ctx, &book); err != nil {
+		t.Fatal(err)
+	}
+
+	first := Bookmark{UserID: reader.ID, BookID: book.ID, Position: "epubcfi(/6/2)", Label: "Opening", Percent: .1}
+	if err := repo.InsertBookmark(ctx, &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.ID == 0 || first.CreatedAt.IsZero() {
+		t.Fatalf("inserted bookmark: %+v", first)
+	}
+	second := Bookmark{UserID: reader.ID, BookID: book.ID, Position: "epubcfi(/6/4)", Label: "Later", Percent: .5}
+	if err := repo.InsertBookmark(ctx, &second); err != nil {
+		t.Fatal(err)
+	}
+	/* Same position again: the row is reused, so the label moves and the count
+	   holds steady. */
+	renamed := Bookmark{UserID: reader.ID, BookID: book.ID, Position: "epubcfi(/6/2)", Label: "Prologue", Percent: .12}
+	if err := repo.InsertBookmark(ctx, &renamed); err != nil {
+		t.Fatal(err)
+	}
+	if renamed.ID != first.ID {
+		t.Fatalf("duplicate position made a new row: %d vs %d", renamed.ID, first.ID)
+	}
+	bookmarks, err := repo.ListBookmarks(ctx, reader.ID, book.ID)
+	if err != nil || len(bookmarks) != 2 || bookmarks[0].Label != "Prologue" || bookmarks[0].Percent != .12 {
+		t.Fatalf("bookmarks: %+v, %v", bookmarks, err)
+	}
+	count, err := repo.CountBookmarks(ctx, reader.ID, book.ID)
+	if err != nil || count != 2 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+	if empty, err := repo.ListBookmarks(ctx, 1, book.ID); err != nil || len(empty) != 0 {
+		t.Fatalf("other user bookmarks: %+v, %v", empty, err)
+	}
+	if err := repo.DeleteBookmark(ctx, 1, first.ID); !IsNotFound(err) {
+		t.Fatalf("delete as another user: %v", err)
+	}
+	if err := repo.DeleteBookmark(ctx, reader.ID, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DeleteBookmark(ctx, reader.ID, first.ID); !IsNotFound(err) {
+		t.Fatalf("delete twice: %v", err)
+	}
+	if err := repo.DeleteBookTx(ctx, book.ID); err != nil {
+		t.Fatal(err)
+	}
+	if remaining, err := repo.ListBookmarks(ctx, reader.ID, book.ID); err != nil || len(remaining) != 0 {
+		t.Fatalf("bookmarks survived the book: %+v, %v", remaining, err)
+	}
+}
+
 func TestRepositoryHelpers(t *testing.T) {
 	if got := escapeLike(`a%_\\b`); got != `a\%\_\\\\b` {
 		t.Fatalf("escapeLike: %q", got)

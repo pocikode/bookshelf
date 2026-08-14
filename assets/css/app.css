@@ -364,6 +364,24 @@
   .reader-toc-current span { overflow: hidden; flex: 1 1 auto; text-overflow: ellipsis; white-space: nowrap; }
   .reader-toc-current small { flex: 0 0 auto; font-size: .65rem; font-variant-numeric: tabular-nums; }
 
+  /* A marked spot reads at a glance: the outline fills in, the way a bookmark
+     flag goes solid once it is planted. */
+  #bookmark-toggle[aria-pressed="true"] .icon { fill: currentColor; }
+
+  /* Bookmark rows carry the TOC row treatment with a delete affordance parked
+     at the end, kept out of sight until the row is hovered or focused. */
+  #bookmark-list { margin: 0; padding: 0; list-style: none; }
+  .reader-bookmark-row { display: flex; align-items: center; gap: .25rem; border-radius: .375rem; }
+  .reader-bookmark-row:hover { background: color-mix(in srgb, var(--sunk) 75%, transparent); }
+  .reader-bookmark-item { display: flex; width: 100%; align-items: center; gap: .5rem; border: 0; border-radius: .375rem; background: transparent; padding: .5rem .55rem; color: var(--ink); font-size: .78rem; line-height: 1.35; text-align: left; }
+  .reader-bookmark-item > span { overflow: hidden; flex: 1 1 auto; text-overflow: ellipsis; white-space: nowrap; }
+  .reader-bookmark-item > small { flex: 0 0 auto; color: var(--faint); font-size: .65rem; font-variant-numeric: tabular-nums; }
+  .reader-bookmark-remove { display: grid; width: 1.75rem; height: 1.75rem; flex: 0 0 auto; place-items: center; border: 0; border-radius: .375rem; background: transparent; margin-right: .3rem; color: var(--muted); opacity: 0; transition: opacity .15s ease, color .15s ease; }
+  .reader-bookmark-remove .icon { width: 1rem; height: 1rem; }
+  .reader-bookmark-remove:hover { color: var(--ink); }
+  .reader-bookmark-row:hover .reader-bookmark-remove, .reader-bookmark-remove:focus-visible { opacity: 1; }
+  #bookmark-add { width: calc(100% - .5rem); margin: .5rem .25rem; }
+
   .reader-detail-list { display: grid; margin: 0; border: 1px solid var(--line); border-radius: .5rem; background: var(--surface); overflow: hidden; }
   .reader-detail-list > div { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--line); padding: .65rem .8rem; }
   .reader-detail-list > div:last-child { border-bottom: 0; }
@@ -487,6 +505,9 @@
   .reader-sidebar-body { padding-inline: .6rem; }
   .reader-toc-item { padding-block: .85rem; font-size: .85rem; }
   .reader-toc-current { padding-block: .8rem; font-size: .8rem; }
+  .reader-bookmark-item { padding-block: .85rem; font-size: .85rem; }
+  /* No hover to reveal it on touch, so the remove button always shows. */
+  .reader-bookmark-remove { width: 2.25rem; height: 2.25rem; opacity: 1; }
   .reader-sidebar-tabs { height: calc(4rem + env(safe-area-inset-bottom)); }
   .reader-sidebar-tab { height: auto; margin: .5rem; border-radius: .6rem; }
   .reader-sidebar-tab .icon { width: 1.35rem; height: 1.35rem; }

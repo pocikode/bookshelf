@@ -228,6 +228,8 @@ func TestPracticalHTTPErrorBranches(t *testing.T) {
 	}
 	if rec := app.request("GET", "/books/"+stringID(app.book.ID)+"/read", nil, true); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), app.book.Title) {
 		t.Fatalf("reader response=%d", rec.Code)
+	} else if body := rec.Body.String(); !strings.Contains(body, `id="bookmark-toggle"`) || !strings.Contains(body, `id="bookmark-list"`) {
+		t.Fatal("reader page is missing the bookmark controls")
 	}
 	if rec := app.request("GET", "/api/books/"+stringID(app.book.ID)+"/cover", nil, true); rec.Code != http.StatusNotFound {
 		t.Fatalf("missing cover response=%d", rec.Code)

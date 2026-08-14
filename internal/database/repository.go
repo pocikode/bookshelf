@@ -366,6 +366,58 @@ func (r *Repository) UpsertProgressForUser(ctx context.Context, p *Progress, pre
 	return err
 }
 
+func (r *Repository) ListBookmarks(ctx context.Context, userID, bookID int64) ([]Bookmark, error) {
+	rows, err := r.DB.QueryContext(ctx, `SELECT id,user_id,book_id,position,COALESCE(page,0),label,percent,created_at FROM bookmarks WHERE user_id=? AND book_id=? ORDER BY created_at,id`, userID, bookID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]Bookmark, 0, 8)
+	for rows.Next() {
+		var b Bookmark
+		var created string
+		if err := rows.Scan(&b.ID, &b.UserID, &b.BookID, &b.Position, &b.Page, &b.Label, &b.Percent, &created); err != nil {
+			return nil, err
+		}
+		b.CreatedAt, err = parseStamp(created)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+/* Re-bookmarking a spot already marked refreshes its label rather than failing,
+   so the reader never has to care whether the position is new. */
+func (r *Repository) InsertBookmark(ctx context.Context, b *Bookmark) error {
+	var created string
+	err := r.DB.QueryRowContext(ctx, `INSERT INTO bookmarks(user_id,book_id,position,page,label,percent,created_at) VALUES(?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%fZ','now')) ON CONFLICT(user_id,book_id,position) DO UPDATE SET label=excluded.label,percent=excluded.percent RETURNING id,created_at`, b.UserID, b.BookID, b.Position, nullInt(b.Page), b.Label, b.Percent).Scan(&b.ID, &created)
+	if err != nil {
+		return err
+	}
+	b.CreatedAt, err = parseStamp(created)
+	return err
+}
+
+func (r *Repository) DeleteBookmark(ctx context.Context, userID, id int64) error {
+	res, err := r.DB.ExecContext(ctx, `DELETE FROM bookmarks WHERE id=? AND user_id=?`, id, userID)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (r *Repository) CountBookmarks(ctx context.Context, userID, bookID int64) (int, error) {
+	var count int
+	err := r.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM bookmarks WHERE user_id=? AND book_id=?`, userID, bookID).Scan(&count)
+	return count, err
+}
+
 func escapeLike(s string) string {
 	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 	return r.Replace(s)

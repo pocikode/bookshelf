@@ -26,6 +26,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"pocikode/bookshelf/internal/auth"
+	"pocikode/bookshelf/internal/bookmark"
 	"pocikode/bookshelf/internal/config"
 	"pocikode/bookshelf/internal/database"
 	"pocikode/bookshelf/internal/library"
@@ -43,6 +44,7 @@ type Dependencies struct {
 	Limiter    *ratelimit.Limiter
 	Library    *library.Service
 	Progress   *progress.Service
+	Bookmark   *bookmark.Service
 	Logger     *slog.Logger
 }
 type Server struct {
@@ -114,6 +116,9 @@ func (s *Server) routes() http.Handler {
 			b.Get("/progress", s.getProgress)
 			b.Put("/progress", s.saveProgress)
 			b.Post("/progress", s.saveProgress)
+			b.Get("/bookmarks", s.listBookmarks)
+			b.Post("/bookmarks", s.createBookmark)
+			b.Delete("/bookmarks/{bookmarkID}", s.deleteBookmark)
 		})
 	})
 	return r
@@ -942,6 +947,94 @@ func (s *Server) saveProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 200, p)
 }
+/* Bookmarks hang off a book the reader can already see, so every handler starts
+   from the same visibility lookup the file and progress endpoints use. */
+func (s *Server) bookmarkBook(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, ok := bookID(w, r, s)
+	if !ok {
+		return 0, false
+	}
+	_, err := s.dep.Repository.FindBookForUser(r.Context(), id, currentUser(r).ID, currentUser(r).IsAdmin())
+	if database.IsNotFound(err) {
+		s.jsonError(w, 404, "book_not_found", "Book not found")
+		return 0, false
+	}
+	if err != nil {
+		s.jsonError(w, 500, "internal_error", "Unexpected server failure")
+		return 0, false
+	}
+	return id, true
+}
+
+func (s *Server) listBookmarks(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.bookmarkBook(w, r)
+	if !ok {
+		return
+	}
+	bookmarks, err := s.dep.Bookmark.List(r.Context(), currentUser(r).ID, id)
+	if err != nil {
+		s.jsonError(w, 500, "internal_error", "Unexpected server failure")
+		return
+	}
+	writeJSON(w, 200, bookmarks)
+}
+
+func (s *Server) createBookmark(w http.ResponseWriter, r *http.Request) {
+	id, ok := s.bookmarkBook(w, r)
+	if !ok {
+		return
+	}
+	var in bookmark.CreateRequest
+	if err := decodeJSON(w, r, &in); err != nil {
+		return
+	}
+	token := r.Header.Get("X-CSRF-Token")
+	if token == "" {
+		token = in.CSRFToken
+	}
+	if !auth.SameOrigin(r, s.dep.Config.TrustProxy) || !s.dep.Auth.ValidCSRF(currentSession(r), token) {
+		s.jsonError(w, 403, "csrf_failed", "Request could not be verified")
+		return
+	}
+	saved, err := s.dep.Bookmark.Create(r.Context(), currentUser(r).ID, id, in)
+	switch {
+	case database.IsNotFound(err):
+		s.jsonError(w, 404, "book_not_found", "Book not found")
+	case errors.Is(err, bookmark.ErrInvalid):
+		s.jsonError(w, 400, "invalid_bookmark", err.Error())
+	case errors.Is(err, bookmark.ErrLimit):
+		s.jsonError(w, 409, "bookmark_limit", err.Error())
+	case err != nil:
+		s.jsonError(w, 500, "internal_error", "Unexpected server failure")
+	default:
+		writeJSON(w, 201, saved)
+	}
+}
+
+func (s *Server) deleteBookmark(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.bookmarkBook(w, r); !ok {
+		return
+	}
+	bookmarkID, ok := pathID(w, r, s, "bookmarkID", "bookmark_not_found", "Bookmark not found")
+	if !ok {
+		return
+	}
+	if !auth.SameOrigin(r, s.dep.Config.TrustProxy) || !s.dep.Auth.ValidCSRF(currentSession(r), r.Header.Get("X-CSRF-Token")) {
+		s.jsonError(w, 403, "csrf_failed", "Request could not be verified")
+		return
+	}
+	err := s.dep.Bookmark.Delete(r.Context(), currentUser(r).ID, bookmarkID)
+	if database.IsNotFound(err) {
+		s.jsonError(w, 404, "bookmark_not_found", "Bookmark not found")
+		return
+	}
+	if err != nil {
+		s.jsonError(w, 500, "internal_error", "Unexpected server failure")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, 24<<10)
 	d := json.NewDecoder(r.Body)
@@ -958,14 +1051,18 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
 }
 
 func bookID(w http.ResponseWriter, r *http.Request, s *Server) (int64, bool) {
-	raw := chi.URLParam(r, "id")
+	return pathID(w, r, s, "id", "book_not_found", "Book not found")
+}
+
+func pathID(w http.ResponseWriter, r *http.Request, s *Server, param, code, message string) (int64, bool) {
+	raw := chi.URLParam(r, param)
 	if raw == "" || strings.HasPrefix(raw, "+") || strings.HasPrefix(raw, "0") {
-		s.jsonError(w, 404, "book_not_found", "Book not found")
+		s.jsonError(w, 404, code, message)
 		return 0, false
 	}
 	id, err := strconv.ParseInt(raw, 10, 64)
 	if err != nil || id < 1 {
-		s.jsonError(w, 404, "book_not_found", "Book not found")
+		s.jsonError(w, 404, code, message)
 		return 0, false
 	}
 	return id, true

@@ -57,6 +57,17 @@ type Progress struct {
 	UpdatedAt   time.Time `json:"updated_at"`
 }
 
+type Bookmark struct {
+	ID        int64     `json:"id"`
+	UserID    int64     `json:"-"`
+	BookID    int64     `json:"book_id"`
+	Position  string    `json:"position"`
+	Page      int       `json:"page,omitempty"`
+	Label     string    `json:"label"`
+	Percent   float64   `json:"percent"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type BookListOptions struct {
 	Query, Category, Sort, Direction string
 	Page, Limit                      int

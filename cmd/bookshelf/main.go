@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"pocikode/bookshelf/internal/auth"
+	"pocikode/bookshelf/internal/bookmark"
 	"pocikode/bookshelf/internal/config"
 	"pocikode/bookshelf/internal/database"
 	"pocikode/bookshelf/internal/library"
@@ -95,7 +96,7 @@ func serve() error {
 			"event", "default_password_in_use",
 			"advice", "APP_PASSWORD was not set; the built-in default password is in use, set APP_PASSWORD before exposing this service")
 	}
-	handler, err := web.NewServer(web.Dependencies{Config: cfg, Repository: repo, Auth: authService, Limiter: ratelimit.New(nil), Library: libraryService, Progress: progress.New(repo), Logger: logger})
+	handler, err := web.NewServer(web.Dependencies{Config: cfg, Repository: repo, Auth: authService, Limiter: ratelimit.New(nil), Library: libraryService, Progress: progress.New(repo), Bookmark: bookmark.New(repo), Logger: logger})
 	if err != nil {
 		db.Close()
 		return err
