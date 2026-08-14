@@ -320,9 +320,19 @@
   #reader-app[data-format="pdf"] .reader-stage { touch-action: pan-x pan-y; }
   #pdf-spread .pdf-sheet { position: relative; width: fit-content; min-width: 0; }
   #pdf-spread canvas { display: block; height: auto; margin: 0 auto; }
-  .pdf-text-layer { position: absolute; inset: 0; overflow: hidden; line-height: 1; user-select: text; }
+  .pdf-text-layer { position: absolute; inset: 0; overflow: hidden; line-height: 1; text-align: initial; forced-color-adjust: none; text-size-adjust: none; user-select: text; }
   .pdf-text-layer :is(span, br) { position: absolute; color: transparent; cursor: text; white-space: pre; transform-origin: 0 0; }
-  .pdf-text-layer ::selection { background: color-mix(in srgb, AccentColor, transparent 75%); }
+  /* A marked-content span only groups its children, which position themselves
+     against its top-left; left to lay itself out it drags them off the glyphs. */
+  .pdf-text-layer span.markedContent { top: 0; height: 0; }
+  /* Selected text is repainted in the highlight's own foreground colour, which
+     revives glyphs this layer keeps transparent: they land a hair off the ones
+     on the canvas and the page reads as doubled. Pinning the colour keeps the
+     highlight and drops the ghost. */
+  .pdf-text-layer ::selection { color: transparent; -webkit-text-fill-color: transparent; background: color-mix(in srgb, AccentColor, transparent 75%); }
+  /* Every line break sits at the layer origin, so highlighting them stacks a
+     column of boxes down the left edge of the sheet. */
+  .pdf-text-layer br::selection { background: transparent; }
   #reader-app[data-pdf-tone="paper"] #pdf-spread canvas, #reader-app[data-pdf-tone="sepia"] #pdf-spread canvas { mix-blend-mode: multiply; }
   .reader-tap-zone { position: absolute; top: var(--band); bottom: var(--band); z-index: 10; display: none; width: 16%; border: 0; background: transparent; }
   .reader-prev-zone { left: 0; }
