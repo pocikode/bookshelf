@@ -65,6 +65,7 @@ func (a *API) Handler() http.Handler {
 	})
 	mux.HandleFunc("POST /api/auth/login", a.login)
 	mux.HandleFunc("POST /api/auth/logout", a.withAuth(a.logout))
+	mux.HandleFunc("POST /api/auth/password", a.withAuth(a.updatePassword))
 	mux.HandleFunc("GET /api/auth/me", a.me)
 	mux.HandleFunc("GET /api/books", a.withAuth(a.listBooks))
 	mux.HandleFunc("POST /api/books", a.withAuth(a.uploadBook))
@@ -172,6 +173,36 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	logEvent(r, slog.LevelInfo, "login succeeded", nil,
 		slog.String("userId", user.ID), slog.String("username", user.Username))
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
+}
+
+func (a *API) updatePassword(w http.ResponseWriter, r *http.Request, session auth.Session) {
+	var input struct {
+		Password string `json:"password"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.Password == "" {
+		writeError(w, r, http.StatusBadRequest, "password is required", nil,
+			slog.String("userId", session.User.ID))
+		return
+	}
+
+	hash, err := auth.HashPassword(input.Password)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not update password", err,
+			slog.String("userId", session.User.ID))
+		return
+	}
+	if _, err := a.DB.Exec(`UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?`,
+		hash, time.Now().UnixMilli(), session.User.ID); err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not update password", err,
+			slog.String("userId", session.User.ID))
+		return
+	}
+
+	logEvent(r, slog.LevelInfo, "password updated", nil, slog.String("userId", session.User.ID))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) logout(w http.ResponseWriter, r *http.Request, session auth.Session) {
