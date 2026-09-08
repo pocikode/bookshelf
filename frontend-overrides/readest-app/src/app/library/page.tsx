@@ -207,7 +207,7 @@ const LibraryPageWithSearchParams = () => {
 const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchParams | null }) => {
   const router = useAppRouter();
   const { envConfig, appService } = useEnv();
-  const { token, user } = useAuth();
+  const { token, user, isAuthLoading } = useAuth();
   const {
     library: libraryBooks,
     libraryLoaded: libraryLoadedFromDisk,
@@ -693,6 +693,10 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   }, [pendingNavigationBookIds, appService, router]);
 
   useEffect(() => {
+    // The personal session is resolved asynchronously from an HttpOnly cookie.
+    // Running `initLogin` before it lands saw `token`/`user` still null and
+    // redirected a signed-in user to /auth on every reload.
+    if (isAuthLoading) return;
     if (isInitiating.current) return;
     isInitiating.current = true;
 
@@ -779,8 +783,10 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       isInitiating.current = false;
     };
     // Non-search URL changes trigger parsing OPEN_WITH_FILES without reinitializing on every keystroke.
+    // `isAuthLoading` is a dep so this re-runs once the personal session lands;
+    // the `isInitiating` guard above keeps it to a single initialization.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [libraryInitKey]);
+  }, [libraryInitKey, isAuthLoading]);
 
   useEffect(() => {
     if (process.env['NEXT_PUBLIC_PERSONAL_APP'] !== 'true' || !user) return;

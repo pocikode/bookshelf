@@ -366,10 +366,51 @@ func (a *API) pushSync(w http.ResponseWriter, r *http.Request, session auth.Sess
 	writeJSON(w, 200, map[string]any{"cursor": cursor, "changes": changes, "deviceId": body.DeviceID})
 }
 
+// runtimeConfig serves the `/runtime-config.js` that the app shell loads with
+// `strategy='beforeInteractive'`. Upstream emits it from a Next.js route
+// handler, but the personal build is a static export (`output: 'export'`), so
+// no such file exists in `out/`. Without this route the request fell through to
+// the SPA fallback below and the browser parsed `index.html` as JavaScript,
+// failing with "expected expression, got '<'" before any app code ran.
+//
+// The personal deployment talks only to this server over same-origin `/api`,
+// so an empty config is correct: it defines the global the consumers read and
+// leaves every field unset, which is exactly the "fall back to build-time
+// defaults" path they already handle.
+func (a *API) runtimeConfig(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store, max-age=0")
+	_, _ = w.Write([]byte("window.__READEST_RUNTIME_CONFIG={};\n"))
+}
+
 func (a *API) staticFile(w http.ResponseWriter, r *http.Request) {
-	path := filepath.Join(a.Config.StaticDir, filepath.Clean("/"+r.URL.Path))
+	if r.URL.Path == "/runtime-config.js" {
+		a.runtimeConfig(w, r)
+		return
+	}
+	clean := filepath.Clean("/" + r.URL.Path)
+	path := filepath.Join(a.Config.StaticDir, clean)
 	if info, err := os.Stat(path); err == nil && !info.IsDir() {
 		http.ServeFile(w, r, path)
+		return
+	}
+	// The static export writes a route as `<route>.html`, and also as a
+	// directory when the route has children — `/auth` is both `auth.html` and
+	// `auth/` (holding `callback`, `recovery`, ...). Statting the path alone
+	// therefore matched the directory, fell through to the SPA shell, and served
+	// the root document for `/auth`: the app booted on `/` and rendered the
+	// library instead of the login form.
+	if page := path + ".html"; clean != "/" {
+		if info, err := os.Stat(page); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, page)
+			return
+		}
+	}
+	// Never answer an asset request with the SPA shell. Returning HTML for a
+	// missing `.js` surfaces as an opaque parse error in the browser; a 404 is
+	// both correct and debuggable.
+	if ext := filepath.Ext(r.URL.Path); ext != "" && ext != ".html" {
+		http.NotFound(w, r)
 		return
 	}
 	index := filepath.Join(a.Config.StaticDir, "index.html")

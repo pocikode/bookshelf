@@ -261,6 +261,10 @@ export default function AuthPage() {
   }, []);
 
   useEffect(() => {
+    // Personal mode has no Supabase session to observe; PersonalAuthPanel does
+    // its own redirect. Hook order forbids returning before this effect, so the
+    // guard lives inside it.
+    if (process.env['NEXT_PUBLIC_PERSONAL_APP'] === 'true') return;
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.access_token && session.user) {
         login(session.access_token, session.user);

@@ -1,10 +1,12 @@
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useAuth } from '@/context/AuthContext';
 import { personalLogin } from '@/services/personal/authApi';
 
 export default function PersonalAuthPanel() {
   const _ = useTranslation();
+  const router = useRouter();
   const { personalLogin: setPersonalUser } = useAuth();
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,6 +19,13 @@ export default function PersonalAuthPanel() {
     try {
       const result = await personalLogin(String(data.get('username') ?? ''), String(data.get('password') ?? ''));
       setPersonalUser(result.user);
+      // Nothing else navigates on success. The non-personal flows redirect from
+      // the `supabase.auth.onAuthStateChange` listener in the parent page, which
+      // never fires for a cookie session, so a successful login used to just sit
+      // on the form. Honour `?redirect=` the way the library route sets it.
+      const redirectTo = new URLSearchParams(window.location.search).get('redirect');
+      router.replace(redirectTo ?? '/library');
+      return;
     } catch (err) {
       setError(err instanceof Error ? err.message : _('Sign in failed'));
     } finally {
