@@ -9,7 +9,7 @@ COPY scripts scripts
 # copy; the cache mount is what keeps repeat builds off the network by reusing
 # Bun's global package cache.
 RUN --mount=type=cache,target=/root/.bun/install/cache bun run prepare:frontend
-RUN bun --cwd .build/readest/apps/readest-app run build-personal
+RUN bun run --cwd .build/readest/apps/readest-app build-personal
 
 FROM golang:1.27 AS backend
 WORKDIR /src
