@@ -108,3 +108,11 @@ The parent repository's frontend changes are intentionally limited to `frontend-
 ## Graphify
 
 The selected Readest revision's `readest/apps/readest-app/graphify-out/` artifacts are preserved by the submodule checkout when present. Graphify is developer-time repository analysis, not an application runtime dependency. Its machine-specific intermediate paths should not be treated as portable deployment data.
+
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
+
+It builds on [Readest](https://github.com/readest/readest), which is also AGPL-3.0 licensed. The generated frontend in `.build/readest/` combines upstream Readest sources with the overrides in `frontend-overrides/readest-app/`, so distributed builds are derivative works and remain under the AGPL-3.0. Copyright for the upstream code stays with the Readest authors.
+
+Because the AGPL's network clause applies, any publicly reachable deployment must offer its users the corresponding source of the running version.
