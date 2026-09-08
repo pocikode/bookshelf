@@ -39,6 +39,10 @@ For frontend-only work, run `bun run prepare:frontend` followed by `bun --cwd .b
 - `ADMIN_USERNAME` and `ADMIN_PASSWORD`: create the first user only when the database has no users.
 - `MAX_UPLOAD_BYTES`: upload limit; default is 512 MiB.
 - `STATIC_DIR`: generated frontend directory; default is `./web`.
+- `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`; default is `info`.
+- `LOG_FORMAT`: `json` or `text`; default is `json`.
+
+The server writes structured logs to stderr. Every request produces one access-log line — at `error` for 5xx, `warn` for 4xx, `info` otherwise — carrying a `requestId` that is also returned in the `X-Request-ID` response header. Failures log the underlying cause; clients only receive a generic message.
 
 After the first account is created, remove the admin password from the runtime environment. User records and sessions are stored in SQLite.
 

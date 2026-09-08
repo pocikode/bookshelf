@@ -21,7 +21,7 @@ type DB struct{ *sql.DB }
 func Open(path string) (*DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open sqlite at %s: %w", path, err)
 	}
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
@@ -30,13 +30,13 @@ func Open(path string) (*DB, error) {
 	for _, pragma := range []string{"PRAGMA journal_mode = WAL", "PRAGMA foreign_keys = ON", "PRAGMA busy_timeout = 5000"} {
 		if _, err := db.ExecContext(ctx, pragma); err != nil {
 			db.Close()
-			return nil, fmt.Errorf("sqlite setup: %w", err)
+			return nil, fmt.Errorf("sqlite setup (%s): %w", pragma, err)
 		}
 	}
 	schema, err := migrationFS.ReadFile("schema.sql")
 	if err != nil {
 		db.Close()
-		return nil, err
+		return nil, fmt.Errorf("read embedded schema: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, string(schema)); err != nil {
 		db.Close()
