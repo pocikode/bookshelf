@@ -1,0 +1,9 @@
+.git
+.github
+data
+**/node_modules
+**/.next
+**/out
+readest/apps/readest-app/graphify-out/cache
+readest/apps/readest-app/graphify-out/.graphify_*
+readest/apps/readest-app/graphify-out/.tmp_*

@@ -1,0 +1,20 @@
+services:
+  readest:
+    image: ghcr.io/<owner>/readest-personal:latest
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      PORT: 3000
+      ENV: production
+      SESSION_SECRET: ${SESSION_SECRET}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-reader}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:3000:3000"
+    healthcheck:
+      test: ["CMD", "/app/readest", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

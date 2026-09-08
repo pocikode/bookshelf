@@ -1,0 +1,10 @@
+/data/
+/web/
+/.build/
+**/node_modules/
+**/.next/
+**/out/
+*.tsbuildinfo
+.env.local
+.env.*.local
+.env
