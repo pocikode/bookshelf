@@ -1,6 +1,6 @@
-# Readest Personal
+# Bookshelf
 
-Readest Personal is a self-hosted Readest integration with the existing Readest web reader and library UI, plus a small Go/SQLite service for a personal library, authentication, ebook storage, and synchronization. Readest is pinned as the `readest/` Git submodule; the parent repository tracks only integration overrides.
+Bookshelf is a self-hosted Readest integration with the existing Readest web reader and library UI, plus a small Go/SQLite service for a shared library, authentication, ebook storage, and synchronization. Readest is pinned as the `readest/` Git submodule; the parent repository tracks only integration overrides.
 
 The frontend remains the Readest frontend. EPUB and PDF files are streamed to the browser and rendered by the existing Foliate/PDF reader. The production container runs one Go process and contains no Node.js or Bun runtime.
 
@@ -79,7 +79,7 @@ Do not expose the container port publicly and do not mount `/data` into a public
 
 ## GHCR
 
-The workflow in `.github/workflows/ci.yml` runs Bun install with the frozen lockfile, frontend typecheck/lint/build, Go tests/vet, and publishes `ghcr.io/<owner>/readest-personal` on pushes. Main publishes `latest`; version tags such as `v0.1.0` publish the matching immutable tag.
+The workflow in `.github/workflows/ci.yml` runs Bun install with the frozen lockfile, frontend typecheck/lint/build, Go tests/vet, and publishes `ghcr.io/<owner>/bookshelf` on pushes. Main publishes `latest`; version tags such as `v0.1.0` publish the matching immutable tag.
 
 ## Backup
 

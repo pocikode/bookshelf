@@ -1,5 +1,6 @@
 import withSerwistInit from '@serwist/next';
 import withBundleAnalyzer from '@next/bundle-analyzer';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,9 +21,15 @@ const exportOutput = (appPlatform !== 'web' || personalStatic) && !isDev;
 // local `build-web` (output undefined), dev, and the Cloudflare/OpenNext
 // deploy — which forces standalone itself via NEXT_PRIVATE_STANDALONE.
 const standaloneOutput = !exportOutput && process.env['BUILD_STANDALONE'] === 'true';
+const bookshelfPackage = JSON.parse(
+  readFileSync(path.join(__dirname, '../../../..', 'package.json'), 'utf8'),
+);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_BOOKSHELF_VERSION: bookshelfPackage.version,
+  },
   // Ensure Next.js uses SSG instead of SSR
   // https://nextjs.org/docs/pages/building-your-application/deploying/static-exports
   // The Docker production image opts into a self-contained `.next/standalone`

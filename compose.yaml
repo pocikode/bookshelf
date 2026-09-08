@@ -1,6 +1,6 @@
 services:
   readest:
-    image: ghcr.io/<owner>/readest-personal:latest
+    image: ghcr.io/<owner>/bookshelf:latest
     restart: unless-stopped
     environment:
       DATA_DIR: /data

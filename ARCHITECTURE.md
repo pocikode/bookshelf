@@ -1,4 +1,4 @@
-# Readest Personal Architecture
+# Bookshelf Architecture
 
 ## Revision and Fork Boundary
 

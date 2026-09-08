@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "readest-personal",
+      "name": "bookshelf",
       "devDependencies": {
         "@biomejs/biome": "^2.4.9",
         "@sindresorhus/tsconfig": "^6.0.0",

@@ -55,7 +55,7 @@ jobs:
       - uses: docker/metadata-action@v5
         id: meta
         with:
-          images: ghcr.io/${{ github.repository_owner }}/readest-personal
+          images: ghcr.io/${{ github.repository_owner }}/bookshelf
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=ref,event=tag

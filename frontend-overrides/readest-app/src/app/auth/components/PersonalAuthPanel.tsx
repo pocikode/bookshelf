@@ -17,7 +17,10 @@ export default function PersonalAuthPanel() {
     setError('');
     setLoading(true);
     try {
-      const result = await personalLogin(String(data.get('username') ?? ''), String(data.get('password') ?? ''));
+      const result = await personalLogin(
+        String(data.get('username') ?? ''),
+        String(data.get('password') ?? ''),
+      );
       setPersonalUser(result.user);
       // Nothing else navigates on success. The non-personal flows redirect from
       // the `supabase.auth.onAuthStateChange` listener in the parent page, which
@@ -35,10 +38,28 @@ export default function PersonalAuthPanel() {
 
   return (
     <form onSubmit={submit} className='flex w-full max-w-sm flex-col gap-4'>
-      <div className='text-center'><h1 className='text-xl font-semibold'>{_('Sign in to Readest')}</h1><p className='text-base-content/70 mt-1 text-sm'>{_('Personal library')}</p></div>
-      <input name='username' required autoComplete='username' placeholder={_('Username')} className='input input-bordered eink-bordered w-full rounded-lg' />
-      <input name='password' required type='password' autoComplete='current-password' placeholder={_('Password')} className='input input-bordered eink-bordered w-full rounded-lg' />
-      <button type='submit' className='btn btn-primary w-full rounded-lg' disabled={loading}>{loading ? _('Signing in...') : _('Sign in')}</button>
+      <div className='text-center'>
+        <h1 className='text-xl font-semibold'>{_('Sign in to Bookshelf')}</h1>
+        <p className='text-base-content/70 mt-1 text-sm'>{_('Shared library')}</p>
+      </div>
+      <input
+        name='username'
+        required
+        autoComplete='username'
+        placeholder={_('Username')}
+        className='input input-bordered eink-bordered w-full rounded-lg'
+      />
+      <input
+        name='password'
+        required
+        type='password'
+        autoComplete='current-password'
+        placeholder={_('Password')}
+        className='input input-bordered eink-bordered w-full rounded-lg'
+      />
+      <button type='submit' className='btn btn-primary w-full rounded-lg' disabled={loading}>
+        {loading ? _('Signing in...') : _('Sign in')}
+      </button>
       {error && <p className='text-error text-center text-sm'>{error}</p>}
     </form>
   );
