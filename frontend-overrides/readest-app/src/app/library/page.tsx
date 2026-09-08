@@ -58,7 +58,11 @@ import { useBookDataStore } from '@/store/bookDataStore';
 import { useTransferStore } from '@/store/transferStore';
 import { useBackgroundTexture } from '@/hooks/useBackgroundTexture';
 import { getLibraryViewSettings } from '@/helpers/settings';
-import { personalBooks, personalUploadBook } from '@/services/personal/booksApi';
+import {
+  personalBooks,
+  personalBookToLibraryBook,
+  personalUploadBook,
+} from '@/services/personal/booksApi';
 import { useAppUrlIngress } from '@/hooks/useAppUrlIngress';
 import { useOpenWithBooks } from '@/hooks/useOpenWithBooks';
 import { useOpenAnnotationLink } from '@/hooks/useOpenAnnotationLink';
@@ -792,15 +796,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     if (process.env['NEXT_PUBLIC_PERSONAL_APP'] !== 'true' || !user) return;
     personalBooks()
       .then((remoteBooks) => {
-        const converted = remoteBooks.map((book) => ({
-          hash: book.id,
-          format: book.mimeType === 'application/pdf' ? 'PDF' : 'EPUB',
-          title: book.title,
-          author: book.author,
-          url: `/api/books/${book.id}/file`,
-          createdAt: book.createdAt,
-          updatedAt: book.updatedAt,
-        }) as Book);
+        const converted = remoteBooks.map(personalBookToLibraryBook);
         setLibrary(converted);
         setLibraryLoaded(true);
       })
@@ -947,15 +943,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       try {
         if (process.env['NEXT_PUBLIC_PERSONAL_APP'] === 'true' && file instanceof File) {
           const remote = await personalUploadBook(file);
-          const personalBook = {
-            hash: remote.id,
-            format: remote.mimeType === 'application/pdf' ? 'PDF' : 'EPUB',
-            title: remote.title,
-            author: remote.author,
-            url: `/api/books/${remote.id}/file`,
-            createdAt: remote.createdAt,
-            updatedAt: remote.updatedAt,
-          } as Book;
+          const personalBook = personalBookToLibraryBook(remote);
           library.push(personalBook);
           successfulImports.push(personalBook.title);
           return personalBook;

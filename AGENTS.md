@@ -7,6 +7,8 @@
 - Never edit `.build/readest/`. `bun run prepare:frontend` mirrors the current `readest/` working tree into `.build/` (deleting anything upstream no longer has), overlays `frontend-overrides/readest-app/`, installs dependencies, and copies vendor assets. Uncommitted changes inside `readest/` can therefore leak into generated builds. The sync deliberately preserves the generated `node_modules/`, `.next/` and `out/` trees so repeat runs stay cheap; run `PREPARE_CLEAN=1 bun run prepare:frontend` to force the from-scratch rebuild, which is worth doing after moving the pinned Readest revision. Where `rsync` is unavailable — notably the `Dockerfile` builder image — the script falls back to a full copy.
 - Overrides replace whole files and cannot delete upstream files. Reconcile full-file overrides such as `package.json` and `next.config.mjs` whenever the Readest revision changes.
 - For code mirrored from the upstream app, also follow `readest/apps/readest-app/AGENTS.md`; consult its linked i18n, design, safe-area, TTS, and testing docs when touching those areas.
+- Graphify analysis outputs live in `graphify-out/` at the repository root. `graph.html`, `graph.json`, and `GRAPH_REPORT.md` are developer-time artifacts only; do not treat them as application runtime inputs or edit generated intermediate files manually.
+- The Readest submodule may also contain Graphify outputs at `readest/apps/readest-app/graphify-out/`. When that directory exists, agents may use its graph and report artifacts to explore the upstream Readest codebase; treat them as read-only developer-time analysis outputs.
 
 ## Commands
 

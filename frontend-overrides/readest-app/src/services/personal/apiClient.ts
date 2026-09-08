@@ -8,7 +8,9 @@ const csrfToken = () =>
 
 export async function personalRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (typeof init.body === 'string' && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
   if (init.method && !['GET', 'HEAD'].includes(init.method)) headers.set('X-CSRF-Token', csrfToken());
   const response = await fetch(`/api${path}`, { ...init, headers, credentials: 'include' });
   if (!response.ok) {

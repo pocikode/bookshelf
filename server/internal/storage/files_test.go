@@ -2,6 +2,8 @@ package storage
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -29,5 +31,35 @@ func TestSaveRejectsInvalidBook(t *testing.T) {
 	}
 	if _, err := store.Save(bytes.NewReader([]byte("book")), "book.txt", "text/plain"); err == nil {
 		t.Fatal("expected unsupported format error")
+	}
+}
+
+func TestSaveCoverValidatesAndStoresImageBesideBook(t *testing.T) {
+	root := t.TempDir()
+	store := FileStore{Root: root, MaxUpload: 1024}
+	bookPath := filepath.Join(root, "book.epub")
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 504)...)
+
+	coverPath, err := store.SaveCover(bytes.NewReader(png), bookPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if coverPath != filepath.Join(root, "book.cover.png") {
+		t.Fatalf("cover path = %q", coverPath)
+	}
+	stored, err := os.ReadFile(coverPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(stored, png) {
+		t.Fatal("stored cover differs from upload")
+	}
+}
+
+func TestSaveCoverRejectsNonImage(t *testing.T) {
+	root := t.TempDir()
+	store := FileStore{Root: root, MaxUpload: 1024}
+	if _, err := store.SaveCover(bytes.NewReader([]byte("not an image")), filepath.Join(root, "book.epub")); err == nil {
+		t.Fatal("expected invalid cover error")
 	}
 }

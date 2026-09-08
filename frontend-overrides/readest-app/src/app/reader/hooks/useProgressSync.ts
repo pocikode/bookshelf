@@ -17,6 +17,7 @@ import { DEFAULT_BOOK_SEARCH_CONFIG, SYNC_PROGRESS_INTERVAL_SEC } from '@/servic
 import { getCFIFromXPointer, getXPointerFromCFI } from '@/utils/xcfi';
 import { isMalformedLocationCfi } from '@/utils/cfi';
 import { personalProgress, savePersonalProgress } from '@/services/personal/progressApi';
+import { personalBookId } from '@/services/personal/booksApi';
 
 // Backoff schedule for the first-pull retry on book open. After these
 // attempts the gate releases unconditionally so the user's progress can
@@ -64,9 +65,10 @@ export const useProgressSync = (bookKey: string) => {
     const book = getBookData(bookKey)?.book;
     if (!config || !book || !user) return;
     if (process.env['NEXT_PUBLIC_PERSONAL_APP'] === 'true') {
+      const bookId = personalBookId(book);
       const [current, total] = config.progress ?? [0, 0];
-      if (config.location && total > 0) {
-        await savePersonalProgress(book.hash, config.location, Math.max(0, Math.min(1, current / total)));
+      if (bookId && config.location && total > 0) {
+        await savePersonalProgress(bookId, config.location, Math.max(0, Math.min(1, current / total)));
       }
       return;
     }
@@ -89,7 +91,9 @@ export const useProgressSync = (bookKey: string) => {
     const book = getBookData(bookKey)?.book;
     if (!user || !book) return;
     if (process.env['NEXT_PUBLIC_PERSONAL_APP'] === 'true') {
-      const remote = await personalProgress(book.hash);
+      const bookId = personalBookId(book);
+      if (!bookId) return;
+      const remote = await personalProgress(bookId);
       const localConfig = getConfig(bookKey);
       if (remote?.locator?.cfi && localConfig && remote.locator.cfi !== localConfig.location) {
         await saveConfig(envConfig, bookKey, {

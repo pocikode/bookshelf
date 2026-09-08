@@ -88,3 +88,23 @@ func TestRoutePageWinsOverSameNamedDirectory(t *testing.T) {
 		t.Fatalf("expected auth.html, got %q", rec.Body.String())
 	}
 }
+
+func TestDynamicReaderPathServesExportedReaderPage(t *testing.T) {
+	api := staticAPI(t)
+	dir := filepath.Join(api.Config.StaticDir, "reader")
+	if err := os.Mkdir(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "[ids].html"), []byte("<html>reader page</html>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	api.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reader/book-hash", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), "reader page") {
+		t.Fatalf("expected reader page, got %q", rec.Body.String())
+	}
+}

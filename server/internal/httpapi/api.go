@@ -226,7 +226,7 @@ func (a *API) getBook(w http.ResponseWriter, r *http.Request, session auth.Sessi
 }
 
 func (a *API) uploadBook(w http.ResponseWriter, r *http.Request, session auth.Session) {
-	r.Body = http.MaxBytesReader(w, r.Body, a.Config.MaxUpload+1)
+	r.Body = http.MaxBytesReader(w, r.Body, a.Config.MaxUpload+(20<<20)+(1<<20))
 	if err := r.ParseMultipartForm(a.Config.MaxUpload); err != nil {
 		var tooLarge *http.MaxBytesError
 		status := http.StatusBadRequest
@@ -257,9 +257,34 @@ func (a *API) uploadBook(w http.ResponseWriter, r *http.Request, session auth.Se
 			slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
 		return
 	}
+	cover, _, err := r.FormFile("cover")
+	if err == nil {
+		defer cover.Close()
+		uploaded.CoverPath, err = a.Files.SaveCover(cover, uploaded.Path)
+		if errors.Is(err, storage.ErrRejected) {
+			a.removeFile(r, uploaded.Path)
+			writeError(w, r, http.StatusUnsupportedMediaType, err.Error(), nil,
+				slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
+			return
+		}
+		if err != nil {
+			a.removeFile(r, uploaded.Path)
+			writeError(w, r, http.StatusInternalServerError, "could not store cover", err,
+				slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
+			return
+		}
+	} else if !errors.Is(err, http.ErrMissingFile) {
+		a.removeFile(r, uploaded.Path)
+		writeError(w, r, http.StatusBadRequest, "invalid cover", err,
+			slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
+		return
+	}
 	metadata := json.RawMessage(r.FormValue("metadata"))
 	if len(metadata) > 0 && !json.Valid(metadata) {
 		a.removeFile(r, uploaded.Path)
+		if uploaded.CoverPath != "" {
+			a.removeFile(r, uploaded.CoverPath)
+		}
 		writeError(w, r, http.StatusBadRequest, "metadata must be JSON", nil,
 			slog.String("userId", session.User.ID))
 		return
@@ -268,9 +293,12 @@ func (a *API) uploadBook(w http.ResponseWriter, r *http.Request, session auth.Se
 	if title == "" {
 		title = strings.TrimSuffix(filepath.Base(header.Filename), filepath.Ext(header.Filename))
 	}
-	book, err := a.Books.Create(session.User.ID, books.Uploaded{Path: uploaded.Path, OriginalName: uploaded.OriginalName, MimeType: uploaded.MimeType, Size: uploaded.Size, Hash: uploaded.Hash}, title, r.FormValue("author"), metadata)
+	book, err := a.Books.Create(session.User.ID, books.Uploaded{Path: uploaded.Path, CoverPath: uploaded.CoverPath, OriginalName: uploaded.OriginalName, MimeType: uploaded.MimeType, Size: uploaded.Size, Hash: uploaded.Hash}, title, r.FormValue("author"), metadata)
 	if err != nil {
 		a.removeFile(r, uploaded.Path)
+		if uploaded.CoverPath != "" {
+			a.removeFile(r, uploaded.CoverPath)
+		}
 		writeError(w, r, http.StatusInternalServerError, "could not save book", err,
 			slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
 		return
@@ -283,7 +311,7 @@ func (a *API) uploadBook(w http.ResponseWriter, r *http.Request, session auth.Se
 
 func (a *API) deleteBook(w http.ResponseWriter, r *http.Request, session auth.Session) {
 	id := r.PathValue("id")
-	path, err := a.Books.Delete(session.User.ID, id)
+	book, err := a.Books.Delete(session.User.ID, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, r, http.StatusNotFound, "book not found", nil,
 			slog.String("userId", session.User.ID), slog.String("bookId", id))
@@ -296,7 +324,10 @@ func (a *API) deleteBook(w http.ResponseWriter, r *http.Request, session auth.Se
 	}
 	// The row is already gone, so a failed unlink leaks a file on disk. The
 	// request still succeeds, but the leak is now traceable.
-	a.removeFile(r, path)
+	a.removeFile(r, book.Path)
+	if book.CoverPath != "" {
+		a.removeFile(r, book.CoverPath)
+	}
 	logEvent(r, slog.LevelInfo, "book deleted", nil,
 		slog.String("userId", session.User.ID), slog.String("bookId", id))
 	w.WriteHeader(http.StatusNoContent)
@@ -346,8 +377,21 @@ func (a *API) bookFile(w http.ResponseWriter, r *http.Request, session auth.Sess
 	w.Header().Set("Cache-Control", "private, max-age=0")
 	http.ServeContent(w, r, book.OriginalName, info.ModTime(), file)
 }
-func (a *API) bookCover(w http.ResponseWriter, r *http.Request, _ auth.Session) {
-	writeError(w, r, http.StatusNotFound, "cover not available", nil)
+func (a *API) bookCover(w http.ResponseWriter, r *http.Request, session auth.Session) {
+	id := r.PathValue("id")
+	book, err := a.Books.Get(session.User.ID, id)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && book.CoverPath == "") {
+		writeError(w, r, http.StatusNotFound, "cover not available", nil,
+			slog.String("userId", session.User.ID), slog.String("bookId", id))
+		return
+	}
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not load cover", err,
+			slog.String("userId", session.User.ID), slog.String("bookId", id))
+		return
+	}
+	w.Header().Set("Cache-Control", "private, max-age=3600")
+	http.ServeFile(w, r, book.CoverPath)
 }
 
 func (a *API) getProgress(w http.ResponseWriter, r *http.Request, session auth.Session) {
@@ -576,6 +620,13 @@ func (a *API) staticFile(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/runtime-config.js" {
 		a.runtimeConfig(w, r)
 		return
+	}
+	if id := strings.TrimPrefix(r.URL.Path, "/reader/"); id != r.URL.Path && id != "" && !strings.Contains(id, "/") {
+		page := filepath.Join(a.Config.StaticDir, "reader", "[ids].html")
+		if info, err := os.Stat(page); err == nil && !info.IsDir() {
+			http.ServeFile(w, r, page)
+			return
+		}
 	}
 	clean := filepath.Clean("/" + r.URL.Path)
 	path := filepath.Join(a.Config.StaticDir, clean)

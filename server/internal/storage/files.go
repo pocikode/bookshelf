@@ -2,11 +2,13 @@ package storage
 
 import (
 	"archive/zip"
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +21,8 @@ import (
 // the handler answers 500 and logs the cause instead of echoing it back.
 var ErrRejected = errors.New("rejected upload")
 
+const maxCoverSize = 20 << 20
+
 type FileStore struct {
 	Root      string
 	MaxUpload int64
@@ -26,6 +30,7 @@ type FileStore struct {
 
 type UploadedFile struct {
 	Path         string
+	CoverPath    string
 	OriginalName string
 	MimeType     string
 	Size         int64
@@ -100,6 +105,65 @@ func (s FileStore) Remove(path string) error {
 		return fmt.Errorf("remove book file %s: %w", cleanPath, err)
 	}
 	return nil
+}
+
+func (s FileStore) SaveCover(r io.Reader, bookPath string) (string, error) {
+	cleanRoot, err := filepath.Abs(s.Root)
+	if err != nil {
+		return "", fmt.Errorf("resolve books root %s: %w", s.Root, err)
+	}
+	cleanBookPath, err := filepath.Abs(bookPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve book path %s: %w", bookPath, err)
+	}
+	if filepath.Dir(cleanBookPath) != cleanRoot {
+		return "", fmt.Errorf("unsafe book path %s: outside %s", cleanBookPath, cleanRoot)
+	}
+
+	header := make([]byte, 512)
+	n, err := io.ReadFull(r, header)
+	if errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("%w: empty cover image", ErrRejected)
+	}
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return "", fmt.Errorf("read cover header: %w", err)
+	}
+	header = header[:n]
+	ext, ok := map[string]string{
+		"image/gif":  ".gif",
+		"image/jpeg": ".jpg",
+		"image/png":  ".png",
+		"image/webp": ".webp",
+	}[http.DetectContentType(header)]
+	if !ok {
+		return "", fmt.Errorf("%w: unsupported cover image", ErrRejected)
+	}
+
+	tmp, err := os.CreateTemp(s.Root, ".cover-*")
+	if err != nil {
+		return "", fmt.Errorf("create temporary cover in %s: %w", s.Root, err)
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	size, err := io.Copy(tmp, io.LimitReader(io.MultiReader(bytes.NewReader(header), r), maxCoverSize+1))
+	if err != nil {
+		tmp.Close()
+		return "", fmt.Errorf("write cover to %s: %w", tmpName, err)
+	}
+	if size > maxCoverSize {
+		tmp.Close()
+		return "", fmt.Errorf("%w: cover exceeds upload limit of %d bytes", ErrRejected, maxCoverSize)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("close cover %s: %w", tmpName, err)
+	}
+
+	bookExt := filepath.Ext(cleanBookPath)
+	coverPath := strings.TrimSuffix(cleanBookPath, bookExt) + ".cover" + ext
+	if err := os.Rename(tmpName, coverPath); err != nil {
+		return "", fmt.Errorf("move cover to %s: %w", coverPath, err)
+	}
+	return coverPath, nil
 }
 
 func validateBook(file *os.File, ext string) (string, error) {
