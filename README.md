@@ -28,6 +28,8 @@ Use `.env.example` as the production configuration template. The root `.env` is 
 
 For frontend-only work, run `bun run prepare:frontend` followed by `bun --cwd .build/readest/apps/readest-app run dev-web`. The personal production build is `bun run build:frontend`; it writes static output to `.build/readest/apps/readest-app/out/`.
 
+`prepare:frontend` syncs `readest/` into `.build/` incrementally and keeps the installed dependencies and Next.js cache between runs, so only the first run pays full price. After bumping the submodule revision, force a clean regeneration with `PREPARE_CLEAN=1 bun run prepare:frontend`.
+
 ## Environment Variables
 
 - `DATA_DIR`: persistent data directory, `/data` in Docker.

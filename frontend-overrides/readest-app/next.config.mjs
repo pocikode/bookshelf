@@ -13,7 +13,8 @@ if (isDev) {
   initOpenNextCloudflareForDev();
 }
 
-const exportOutput = (appPlatform !== 'web' || process.env['PERSONAL_STATIC'] === 'true') && !isDev;
+const personalStatic = process.env['PERSONAL_STATIC'] === 'true';
+const exportOutput = (appPlatform !== 'web' || personalStatic) && !isDev;
 // Opt-in standalone output, set only by the Docker production build
 // (Dockerfile). Every other path keeps the original behavior: Tauri `export`,
 // local `build-web` (output undefined), dev, and the Cloudflare/OpenNext
@@ -31,7 +32,10 @@ const nextConfig = {
   // Emit browser source maps for the Tauri export build so Sentry can
   // symbolicate crashes. `scripts/upload-sourcemaps.mjs` uploads them after the
   // build and strips the .map files, so they never ship inside the app bundle.
-  productionBrowserSourceMaps: exportOutput,
+  // The personal static build has no such consumer: nothing uploads the maps and
+  // `out/` is served verbatim, so generating them only slowed the build down and
+  // shipped ~150 MB of dead weight into the Docker image.
+  productionBrowserSourceMaps: exportOutput && !personalStatic,
   // Monorepo: trace from the repo root so workspace packages land in the
   // standalone tree. Only relevant to — and only set for — the Docker build.
   outputFileTracingRoot: standaloneOutput ? path.join(__dirname, '../../') : undefined,
@@ -71,6 +75,10 @@ const nextConfig = {
     return config;
   },
   turbopack: {
+    // Pin the workspace root. Inference walks up to the wrapper repository and
+    // picks its `bun.lock`, which makes Turbopack treat the whole checkout —
+    // `data/`, `.build/` and all — as the project.
+    root: path.join(__dirname, '../../'),
     resolveAlias: {
       nunjucks: 'nunjucks/browser/nunjucks.js',
       // Turbopack rejects absolute paths in resolveAlias ("server relative

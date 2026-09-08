@@ -19,6 +19,16 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.1'
+      - uses: actions/cache@v4
+        with:
+          # `prepare:frontend` installs the generated `.build/` tree with
+          # `--no-save`, so there is no lockfile of ours to key on. The pinned
+          # submodule's own lockfile plus the override manifest is what decides
+          # that dependency set; restoring Bun's global cache keeps the install
+          # off the network.
+          path: ~/.bun/install/cache
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('bun.lock', 'readest/pnpm-lock.yaml', 'frontend-overrides/readest-app/package.json') }}
+          restore-keys: bun-cache-${{ runner.os }}-
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint

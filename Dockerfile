@@ -5,7 +5,10 @@ COPY .env.example .env
 COPY readest readest
 COPY frontend-overrides frontend-overrides
 COPY scripts scripts
-RUN bun run prepare:frontend
+# The builder image has no rsync, so `prepare:frontend` falls back to a full
+# copy; the cache mount is what keeps repeat builds off the network by reusing
+# Bun's global package cache.
+RUN --mount=type=cache,target=/root/.bun/install/cache bun run prepare:frontend
 RUN bun --cwd .build/readest/apps/readest-app run build-personal
 
 FROM golang:1.27 AS backend

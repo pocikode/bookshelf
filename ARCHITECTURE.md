@@ -55,7 +55,7 @@ The browser API boundary is same-origin `/api/*`. The personal API client is kep
 
 ## Personal Backend
 
-The backend lives under `server/` in the root Go module. It uses `net/http`, `database/sql`, and a pure-Go SQLite driver. `scripts/apply-readest-overrides.sh` copies the pinned submodule into ignored `.build/readest/`, applies only the tracked files in `frontend-overrides/`, installs its frontend dependencies, and prepares generated browser vendor assets. Packages are separated by responsibility:
+The backend lives under `server/` in the root Go module. It uses `net/http`, `database/sql`, and a pure-Go SQLite driver. `scripts/apply-readest-overrides.sh` syncs the pinned submodule into ignored `.build/readest/`, applies only the tracked files in `frontend-overrides/`, installs its frontend dependencies, and prepares generated browser vendor assets. Packages are separated by responsibility:
 
 - `internal/config`: environment and deployment configuration.
 - `internal/database`: SQLite initialization, connection settings, and embedded migrations.

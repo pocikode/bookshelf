@@ -17,7 +17,7 @@
     "build:frontend:baseline": "bun run --cwd .build/readest/apps/readest-app build-web",
     "dev:backend": "go run ./server/cmd/readest",
     "start:backend": "go run ./server/cmd/readest",
-    "typecheck": "bun run build:frontend",
+    "typecheck": "bun run prepare:frontend && bun run --cwd .build/readest/apps/readest-app typecheck",
     "lint": "bun run prepare:frontend && bun run --cwd .build/readest/apps/readest-app lint",
     "test:frontend": "bun run prepare:frontend && bun run --cwd .build/readest/apps/readest-app test"
   }
