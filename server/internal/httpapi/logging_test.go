@@ -125,6 +125,24 @@ func TestServerErrorLogsCauseButDoesNotLeakIt(t *testing.T) {
 	}
 }
 
+func TestBookListIsNotCached(t *testing.T) {
+	api, _ := loggingAPI(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/books", nil)
+
+	api.listBooks(rec, req, auth.Session{User: auth.User{ID: "user-1"}})
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
+	if got := strings.TrimSpace(rec.Body.String()); got != "[]" {
+		t.Errorf("empty book list = %q, want []", got)
+	}
+}
+
 // The SPA shell being absent is a deployment fault, not a normal 404.
 func TestMissingSPAShellIsLogged(t *testing.T) {
 	api, events := loggingAPI(t)

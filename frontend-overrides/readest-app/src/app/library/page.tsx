@@ -47,7 +47,6 @@ import { useResponsiveSize } from '@/hooks/useResponsiveSize';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useTheme } from '@/hooks/useTheme';
 import { useUICSS } from '@/hooks/useUICSS';
-import { useDemoBooks } from './hooks/useDemoBooks';
 import { useBooksSync } from './hooks/useBooksSync';
 import { useLibraryFileSync } from './hooks/useLibraryFileSync';
 import { useBookTransferActions } from './hooks/useBookTransferActions';
@@ -60,7 +59,9 @@ import { useBackgroundTexture } from '@/hooks/useBackgroundTexture';
 import { getLibraryViewSettings } from '@/helpers/settings';
 import {
   personalBooks,
+  personalBookId,
   personalBookToLibraryBook,
+  personalDeleteBook,
   personalUploadBook,
 } from '@/services/personal/booksApi';
 import { useAppUrlIngress } from '@/hooks/useAppUrlIngress';
@@ -69,6 +70,7 @@ import { useOpenAnnotationLink } from '@/hooks/useOpenAnnotationLink';
 import { useOpenBookLink } from '@/hooks/useOpenBookLink';
 import { useReadingWidget } from '@/hooks/useReadingWidget';
 import { useOpenShareLink } from '@/hooks/useOpenShareLink';
+import { useLibraryPageHistoryReset } from '@/hooks/useLibraryPageHistoryReset';
 import { useClipUrlIngress } from '@/hooks/useClipUrlIngress';
 import { useKeyDownActions } from '@/hooks/useKeyDownActions';
 import { SelectedFile, useFileSelector } from '@/hooks/useFileSelector';
@@ -142,6 +144,7 @@ const IMPORT_CONCURRENCY = 4;
 // keep it long enough that the full-library serialization stays a rounding
 // error next to the per-file parse/copy work.
 const IMPORT_CHECKPOINT_INTERVAL_MS = 15 * 1000;
+const isPersonal = process.env['NEXT_PUBLIC_PERSONAL_APP'] === 'true';
 // One import run at a time, app-wide: the manual Import-from-Folder flow and
 // the watched-folder auto-scan must not interleave — each builds a lookup
 // index over the same live library array, so overlapping runs re-import the
@@ -264,7 +267,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   // common reader → library return path), treat the page as loaded
   // immediately. This prevents `showBookshelf` from briefly being false on
   // remount, which used to flash a placeholder before `initLibrary` finished.
-  const [libraryLoaded, setLibraryLoaded] = useState(() => libraryBooks.length > 0);
+  const [libraryLoaded, setLibraryLoaded] = useState(() => !isPersonal && libraryBooks.length > 0);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [isSelectAll, setIsSelectAll] = useState(false);
   const [isSelectNone, setIsSelectNone] = useState(false);
@@ -314,9 +317,18 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   const [pendingNavigationBookIds, setPendingNavigationBookIds] = useState<string[] | null>(null);
   const isInitiating = useRef(false);
 
+  // Browser back can restore this page from the back-forward cache without
+  // remounting React. Clear transient interaction state so a loading layer
+  // left over from opening a book cannot cover the shelf after restoration.
+  useLibraryPageHistoryReset(() => {
+    setLoading(false);
+    setIsSelectMode(false);
+    setIsSelectAll(false);
+    setIsSelectNone(false);
+  });
+
   const iconSize = useResponsiveSize(18);
   const viewSettings = settings.globalViewSettings;
-  const demoBooks = useDemoBooks();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const handleScrollerRef = useCallback((el: HTMLDivElement | null) => {
     scrollRef.current = el;
@@ -722,52 +734,62 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     // Gating on `length > 0` was unsafe: a transient "Open with" entry made the
     // store non-empty before any disk load, so this skipped loadLibraryBooks and
     // a later save persisted the partial library (wiping library.json).
-    const hasCachedLibrary = libraryLoadedFromDisk;
+    const hasCachedLibrary = !isPersonal && libraryLoadedFromDisk;
     const loadingTimeout = hasCachedLibrary ? null : setTimeout(() => setLoading(true), 500);
     const initLibrary = async () => {
-      const appService = await envConfig.getAppService();
-      const settings = await appService.loadSettings();
-      setSettings(settings);
+      try {
+        const appService = await envConfig.getAppService();
+        const settings = await appService.loadSettings();
+        setSettings(settings);
 
-      // Re-grant fs_scope / asset_protocol_scope for every external
-      // library folder the user registered in a previous session, so
-      // in-place books under those roots are immediately readable
-      // through both `dir_scanner::read_dir` and the fs plugin.
-      // Best-effort — `allowPathsInScopes` swallows its own errors.
-      // On iOS the corresponding native-bridge plugin separately
-      // re-acquires security-scoped resources via persisted
-      // bookmarks (see InPlaceFolderBookmarkStore in
-      // NativeBridgePlugin.swift); here we just sync Tauri's in-memory
-      // scope set with the persisted intent.
-      const externalRoots = settings.externalLibraryFolders ?? [];
-      if (externalRoots.length > 0 && appService.allowPathsInScopes) {
-        await appService.allowPathsInScopes(externalRoots, true);
-      }
+        // Re-grant fs_scope / asset_protocol_scope for every external
+        // library folder the user registered in a previous session, so
+        // in-place books under those roots are immediately readable
+        // through both `dir_scanner::read_dir` and the fs plugin.
+        // Best-effort — `allowPathsInScopes` swallows its own errors.
+        // On iOS the corresponding native-bridge plugin separately
+        // re-acquires security-scoped resources via persisted
+        // bookmarks (see InPlaceFolderBookmarkStore in
+        // NativeBridgePlugin.swift); here we just sync Tauri's in-memory
+        // scope set with the persisted intent.
+        const externalRoots = settings.externalLibraryFolders ?? [];
+        if (externalRoots.length > 0 && appService.allowPathsInScopes) {
+          await appService.allowPathsInScopes(externalRoots, true);
+        }
 
-      // Reuse the library from the store when we return from the reader
-      const library = hasCachedLibrary ? libraryBooks : await appService.loadLibraryBooks();
-      let opened = false;
-      if (checkOpenWithBooks) {
-        opened = await handleOpenWithBooks(appService, library);
-      }
-      setCheckOpenWithBooks(opened);
-      if (!opened && checkLastOpenBooks && settings.openLastBooks) {
-        opened = await handleOpenLastBooks(appService, settings.lastOpenBooks, library);
-      }
-      setCheckLastOpenBooks(opened);
+        // Personal mode is server-authoritative. Never hydrate its shelf from
+        // Readest's browser-persisted library, which may contain deleted or demo books.
+        const library = isPersonal
+          ? user
+            ? (await personalBooks()).map(personalBookToLibraryBook)
+            : []
+          : hasCachedLibrary
+            ? libraryBooks
+            : await appService.loadLibraryBooks();
+        let opened = false;
+        if (checkOpenWithBooks) {
+          opened = await handleOpenWithBooks(appService, library);
+        }
+        setCheckOpenWithBooks(opened);
+        if (!opened && checkLastOpenBooks && settings.openLastBooks) {
+          opened = await handleOpenLastBooks(appService, settings.lastOpenBooks, library);
+        }
+        setCheckLastOpenBooks(opened);
 
-      // Skip the redundant setLibrary on the cached path: the store already
-      // contains the same array reference, and a no-op set would still
-      // trigger refreshGroups (O(n) MD5) and a full Bookshelf re-render.
-      // The cold path or the openWith / openLast path may have produced a
-      // different `library` reference (intent-imported books) — only then
-      // do we commit it.
-      if (!hasCachedLibrary || library !== libraryBooks) {
-        setLibrary(library);
+        // Skip the redundant setLibrary on the cached path: the store already
+        // contains the same array reference, and a no-op set would still
+        // trigger refreshGroups (O(n) MD5) and a full Bookshelf re-render.
+        // The cold path or the openWith / openLast path may have produced a
+        // different `library` reference (intent-imported books) — only then
+        // do we commit it.
+        if (!hasCachedLibrary || library !== libraryBooks) {
+          setLibrary(library);
+        }
+        setLibraryLoaded(true);
+      } finally {
+        if (loadingTimeout) clearTimeout(loadingTimeout);
+        setLoading(false);
       }
-      setLibraryLoaded(true);
-      if (loadingTimeout) clearTimeout(loadingTimeout);
-      setLoading(false);
     };
 
     const handleOpenWithBooks = async (appService: AppService, library: Book[]) => {
@@ -780,8 +802,13 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     };
 
     initLogin();
-    initLibrary();
+    void initLibrary().catch((error) => {
+      console.error('Failed to initialize library:', error);
+      if (isPersonal) setLibrary([]);
+      setLibraryLoaded(true);
+    });
     return () => {
+      if (loadingTimeout) clearTimeout(loadingTimeout);
       setCheckOpenWithBooks(false);
       setCheckLastOpenBooks(false);
       isInitiating.current = false;
@@ -791,17 +818,6 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     // the `isInitiating` guard above keeps it to a single initialization.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [libraryInitKey, isAuthLoading]);
-
-  useEffect(() => {
-    if (process.env['NEXT_PUBLIC_PERSONAL_APP'] !== 'true' || !user) return;
-    personalBooks()
-      .then((remoteBooks) => {
-        const converted = remoteBooks.map(personalBookToLibraryBook);
-        setLibrary(converted);
-        setLibraryLoaded(true);
-      })
-      .catch(() => undefined);
-  }, [user, setLibrary]);
 
   useEffect(() => {
     if (process.env['NEXT_PUBLIC_PERSONAL_APP'] !== 'true' || !user) return;
@@ -878,23 +894,6 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       setCurrentVirtualGroup(null);
     }
   }, [libraryBooks, searchParams, settings.libraryGroupBy]);
-
-  useEffect(() => {
-    if (demoBooks.length > 0 && libraryLoaded) {
-      const newLibrary = [...libraryBooks];
-      for (const book of demoBooks) {
-        const idx = newLibrary.findIndex((b) => b.hash === book.hash);
-        if (idx === -1) {
-          newLibrary.push(book);
-        } else {
-          newLibrary[idx] = book;
-        }
-      }
-      setLibrary(newLibrary);
-      appService?.saveLibraryBooks(newLibrary);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demoBooks, libraryLoaded]);
 
   const importBooks = (
     files: SelectedFile[],
@@ -1006,6 +1005,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     // Saving per book would bring back the "library.json save dominates large
     // imports" cost, hence the throttle.
     const checkpoint = createThrottledCheckpoint(async () => {
+      if (isPersonal) return;
       const currentLibrary = useLibraryStore.getState().library;
       const currentAppService = await envConfig.getAppService();
       await currentAppService.saveLibraryBooks(currentLibrary);
@@ -1027,7 +1027,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       await checkpoint.flush();
     }
 
-    pushLibrary();
+    if (!isPersonal) pushLibrary();
 
     if (!options.silent && failedImports.length > 1) {
       setFailedImportsModal(failedImports);
@@ -1168,6 +1168,26 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       };
 
       try {
+        if (process.env['NEXT_PUBLIC_PERSONAL_APP'] === 'true') {
+          const id = personalBookId(book);
+          if (!id) throw new Error('Personal book is missing its server id');
+          await personalDeleteBook(id);
+          const remainingBooks = useLibraryStore
+            .getState()
+            .library.filter((candidate) => personalBookId(candidate) !== id);
+          setLibrary(remainingBooks);
+          if (ttsSessionManager.getSessionByHash(book.hash)) {
+            await ttsSessionManager.stopActive('deleted');
+          }
+          clearBookData(book.hash);
+          eventDispatcher.dispatch('toast', {
+            type: 'info',
+            timeout: 1000,
+            message: deletionMessages[deleteAction],
+          });
+          return true;
+        }
+
         // Handle local deletion immediately. Purge mirrors 'both' (tombstone +
         // queued cloud delete) but hands 'purge' to deleteBook, which also wipes
         // the entire Books/<hash>/ folder (config/nav/cover) — issue #4615.
@@ -1860,7 +1880,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     return <div className='full-height bg-base-200' />;
   }
 
-  const showBookshelf = libraryLoaded || libraryBooks.length > 0;
+  const showBookshelf = libraryLoaded || (!isPersonal && libraryBooks.length > 0);
 
   return (
     <div
@@ -1924,7 +1944,7 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         />
       </div>
       {(loading || isSyncing) && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center'>
+        <div className='pointer-events-none fixed inset-0 z-50 flex items-center justify-center'>
           <Spinner loading />
         </div>
       )}

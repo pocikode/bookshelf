@@ -20,8 +20,10 @@ vi.mock('@/libs/document', () => ({
 vi.mock('@/utils/svg', () => ({ svg2png: vi.fn() }));
 
 import {
+  personalBooks,
   personalBookId,
   personalBookToLibraryBook,
+  personalDeleteBook,
   personalUploadBook,
 } from './booksApi';
 
@@ -85,5 +87,37 @@ describe('personal books API', () => {
     expect(book.url).toBe('/api/books/server-id/file');
     expect(book.coverImageUrl).toBe('/api/books/server-id/cover');
     expect(personalBookId(book)).toBe('server-id');
+  });
+
+  test('deletes a book by its server id', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await personalDeleteBook('server-id');
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/books/server-id',
+      expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    );
+  });
+
+  test('always loads the book list from the network', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify([]), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await personalBooks();
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/books',
+      expect.objectContaining({ cache: 'no-store', credentials: 'include' }),
+    );
+  });
+
+  test('normalizes an empty server response to an empty array', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response('null'));
+
+    await expect(personalBooks()).resolves.toEqual([]);
   });
 });

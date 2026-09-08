@@ -207,6 +207,7 @@ func (a *API) listBooks(w http.ResponseWriter, r *http.Request, session auth.Ses
 			slog.String("userId", session.User.ID))
 		return
 	}
+	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, 200, result)
 }
 func (a *API) getBook(w http.ResponseWriter, r *http.Request, session auth.Session) {

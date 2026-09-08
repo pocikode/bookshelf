@@ -18,7 +18,9 @@ export interface PersonalBook {
 }
 
 export const personalBooks = (query = '') =>
-  personalRequest<PersonalBook[]>(`/books${query ? `?q=${encodeURIComponent(query)}` : ''}`);
+  personalRequest<PersonalBook[]>(`/books${query ? `?q=${encodeURIComponent(query)}` : ''}`, {
+    cache: 'no-store',
+  }).then((books) => books ?? []);
 
 export const personalBookFile = (id: string) => `/api/books/${encodeURIComponent(id)}/file`;
 export const personalBookCover = (id: string) => `/api/books/${encodeURIComponent(id)}/cover`;
@@ -39,6 +41,9 @@ export const personalBookId = (book: Book) => {
   const match = book.url?.match(/^\/api\/books\/([^/]+)\/file$/);
   return match?.[1] ? decodeURIComponent(match[1]) : null;
 };
+
+export const personalDeleteBook = (id: string) =>
+  personalRequest<void>(`/books/${encodeURIComponent(id)}`, { method: 'DELETE' });
 
 export const personalUploadBook = async (file: File) => {
   const form = new FormData();

@@ -33,7 +33,7 @@ func (s Store) List(userID, query string) ([]Book, error) {
 		return nil, fmt.Errorf("query books: %w", err)
 	}
 	defer rows.Close()
-	var result []Book
+	result := make([]Book, 0)
 	for rows.Next() {
 		var book Book
 		if err := rows.Scan(&book.ID, &book.Title, &book.Author, &book.Metadata, &book.OriginalName, &book.MimeType, &book.Size, &book.Hash, &book.CreatedAt, &book.UpdatedAt, &book.Path, &book.CoverPath); err != nil {

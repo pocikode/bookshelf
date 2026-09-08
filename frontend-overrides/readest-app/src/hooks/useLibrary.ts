@@ -12,15 +12,20 @@ export const useLibrary = () => {
   const { user, isAuthLoading } = useAuth();
   const { setLibrary, libraryLoaded: storeLibraryLoaded } = useLibraryStore();
   const { setSettings } = useSettingsStore();
-  const [libraryLoaded, setLibraryLoaded] = useState(storeLibraryLoaded);
+  const [libraryLoaded, setLibraryLoaded] = useState(!isPersonal && storeLibraryLoaded);
   const isInitiating = useRef(false);
 
   useEffect(() => {
-    if (isInitiating.current || storeLibraryLoaded || (isPersonal && isAuthLoading)) {
+    if (isPersonal && isAuthLoading) return;
+    if (isPersonal && !user) {
+      setLibrary([]);
+      setLibraryLoaded(false);
+      return;
+    }
+    if (isInitiating.current || (!isPersonal && storeLibraryLoaded)) {
       if (storeLibraryLoaded && !libraryLoaded) setLibraryLoaded(true);
       return;
     }
-    if (isPersonal && !user) return;
 
     isInitiating.current = true;
     const initLibrary = async () => {
