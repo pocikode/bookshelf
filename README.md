@@ -79,7 +79,7 @@ Do not expose the container port publicly and do not mount `/data` into a public
 
 ## GHCR
 
-The workflow in `.github/workflows/ci.yml` runs Bun install with the frozen lockfile, frontend typecheck/lint/build, Go tests/vet, and publishes `ghcr.io/<owner>/bookshelf` on pushes. Main publishes `latest`; version tags such as `v0.1.0` publish the matching immutable tag.
+The workflow in `.github/workflows/ci.yml` runs Bun install with the frozen lockfile, frontend typecheck/lint/build, Go tests/vet, and builds the container image on pushes. Publishing to `ghcr.io/<owner>/bookshelf` is limited to version tags such as `v0.1.0`, which publish the matching immutable tag.
 
 ## Backup
 
