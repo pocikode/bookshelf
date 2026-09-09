@@ -18,6 +18,7 @@ import { getCFIFromXPointer, getXPointerFromCFI } from '@/utils/xcfi';
 import { isMalformedLocationCfi } from '@/utils/cfi';
 import { personalProgress, savePersonalProgress } from '@/services/personal/progressApi';
 import { personalBookId } from '@/services/personal/booksApi';
+import { usePersonalNotesSync } from './usePersonalNotesSync';
 
 // Backoff schedule for the first-pull retry on book open. After these
 // attempts the gate releases unconditionally so the user's progress can
@@ -26,6 +27,7 @@ import { personalBookId } from '@/services/personal/booksApi';
 const PULL_RETRY_DELAYS_MS = [1500, 4000, 10000];
 
 export const useProgressSync = (bookKey: string) => {
+  usePersonalNotesSync(bookKey);
   const _ = useTranslation();
   // Per-field selectors avoid subscribing this hook's host (FoliateViewer)
   // to the WHOLE bookDataStore — saveConfig writes booksData on every

@@ -76,9 +76,11 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/books/{id}/progress", a.withAuth(a.getProgress))
 	mux.HandleFunc("PUT /api/books/{id}/progress", a.withAuth(a.putProgress))
 	mux.HandleFunc("GET /api/books/{id}/bookmarks", a.withAuth(a.listBookmarks))
-	mux.HandleFunc("POST /api/books/{id}/bookmarks", a.withAuth(a.createBookmark))
+	mux.HandleFunc("PUT /api/books/{id}/bookmarks", a.withAuth(a.createBookmark))
+	mux.HandleFunc("DELETE /api/books/{id}/bookmarks/{noteId}", a.withAuth(a.deleteBookmark))
 	mux.HandleFunc("GET /api/books/{id}/annotations", a.withAuth(a.listAnnotations))
-	mux.HandleFunc("POST /api/books/{id}/annotations", a.withAuth(a.createAnnotation))
+	mux.HandleFunc("PUT /api/books/{id}/annotations", a.withAuth(a.createAnnotation))
+	mux.HandleFunc("DELETE /api/books/{id}/annotations/{noteId}", a.withAuth(a.deleteAnnotation))
 	mux.HandleFunc("GET /api/sync", a.withAuth(a.pullSync))
 	mux.HandleFunc("POST /api/sync", a.withAuth(a.pushSync))
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -477,7 +479,7 @@ func (a *API) createBookmark(w http.ResponseWriter, r *http.Request, session aut
 		return
 	}
 	id := r.PathValue("id")
-	row, err := a.Annotations.CreateBookmark(session.User.ID, id, value.toModel())
+	row, err := a.Annotations.UpsertBookmark(session.User.ID, id, value.toModel())
 	if errors.Is(err, annotations.ErrInvalidInput) {
 		writeError(w, r, http.StatusBadRequest, err.Error(), nil,
 			slog.String("userId", session.User.ID), slog.String("bookId", id))
@@ -489,6 +491,17 @@ func (a *API) createBookmark(w http.ResponseWriter, r *http.Request, session aut
 		return
 	}
 	writeJSON(w, http.StatusCreated, row)
+}
+func (a *API) deleteBookmark(w http.ResponseWriter, r *http.Request, session auth.Session) {
+	if err := a.Annotations.DeleteBookmark(session.User.ID, r.PathValue("id"), r.PathValue("noteId")); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, r, http.StatusNotFound, "bookmark not found", nil)
+		} else {
+			writeError(w, r, http.StatusInternalServerError, "could not delete bookmark", err)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func (a *API) listAnnotations(w http.ResponseWriter, r *http.Request, session auth.Session) {
 	id := r.PathValue("id")
@@ -506,7 +519,7 @@ func (a *API) createAnnotation(w http.ResponseWriter, r *http.Request, session a
 		return
 	}
 	id := r.PathValue("id")
-	row, err := a.Annotations.CreateAnnotation(session.User.ID, id, value.toModel())
+	row, err := a.Annotations.UpsertAnnotation(session.User.ID, id, value.toModel())
 	if errors.Is(err, annotations.ErrInvalidInput) {
 		writeError(w, r, http.StatusBadRequest, err.Error(), nil,
 			slog.String("userId", session.User.ID), slog.String("bookId", id))
@@ -518,6 +531,17 @@ func (a *API) createAnnotation(w http.ResponseWriter, r *http.Request, session a
 		return
 	}
 	writeJSON(w, http.StatusCreated, row)
+}
+func (a *API) deleteAnnotation(w http.ResponseWriter, r *http.Request, session auth.Session) {
+	if err := a.Annotations.DeleteAnnotation(session.User.ID, r.PathValue("id"), r.PathValue("noteId")); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, r, http.StatusNotFound, "annotation not found", nil)
+		} else {
+			writeError(w, r, http.StatusInternalServerError, "could not delete annotation", err)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) pullSync(w http.ResponseWriter, r *http.Request, session auth.Session) {
@@ -788,5 +812,9 @@ type annotationsAnnotation struct {
 }
 
 func (v annotationsAnnotation) toModel() annotations.Annotation {
-	return annotations.Annotation{ID: v.ID, Type: v.Type, Locator: v.Locator, SelectedText: v.SelectedText, Note: v.Note, Metadata: v.Metadata}
+	annotationType := v.Type
+	if annotationType == "annotation" {
+		annotationType = "highlight"
+	}
+	return annotations.Annotation{ID: v.ID, Type: annotationType, Locator: v.Locator, SelectedText: v.SelectedText, Note: v.Note, Metadata: v.Metadata}
 }
