@@ -95,13 +95,24 @@ export const useProgressSync = (bookKey: string) => {
       if (!bookId) return;
       const remote = await personalProgress(bookId);
       const localConfig = getConfig(bookKey);
-      if (remote?.locator?.cfi && localConfig && remote.locator.cfi !== localConfig.location) {
+      const remoteLocation = remote?.locator?.cfi;
+      if (remoteLocation && localConfig && remoteLocation !== localConfig.location) {
         await saveConfig(envConfig, bookKey, {
           ...localConfig,
-          location: remote.locator.cfi,
+          location: remoteLocation,
           progress: [Math.round(remote.progress * 100), 100],
           updatedAt: Date.now(),
         }, settings);
+        const view = getView(bookKey);
+        const isPreview = useReaderStore.getState().getViewState(bookKey)?.previewMode;
+        if (view && !isPreview) {
+          view.goTo(remoteLocation);
+          setHoveredBookKey(null);
+          eventDispatcher.dispatch('hint', {
+            bookKey,
+            message: _('Reading Progress Synced'),
+          });
+        }
       }
       configPulled.current = true;
       return;

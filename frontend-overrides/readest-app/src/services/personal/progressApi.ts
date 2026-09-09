@@ -17,7 +17,9 @@ const deviceId = () => {
 };
 
 export const personalProgress = (bookId: string) =>
-  personalRequest<PersonalProgress | null>(`/books/${encodeURIComponent(bookId)}/progress`);
+  personalRequest<PersonalProgress | null>(`/books/${encodeURIComponent(bookId)}/progress`, {
+    cache: 'no-store',
+  });
 
 export const savePersonalProgress = (bookId: string, locator: string, progress: number) =>
   personalRequest<PersonalProgress>(`/books/${encodeURIComponent(bookId)}/progress`, {
