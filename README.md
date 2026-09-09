@@ -36,15 +36,15 @@ For frontend-only work, run `bun run prepare:frontend` followed by `bun --cwd .b
 - `PORT`: HTTP port, normally `3000`.
 - `SESSION_SECRET`: required when `ENV=production`.
 - `ENV`: set to `production` to enable secure cookies.
-- `ADMIN_USERNAME` and `ADMIN_PASSWORD`: create the first user only when the database has no users.
+- `ADMIN_USERNAME` and `ADMIN_PASSWORD`: create the first admin when the database has no admin. They must be set together. Existing pre-role databases promote their oldest account to admin during startup.
 - `MAX_UPLOAD_BYTES`: upload limit; default is 512 MiB.
 - `STATIC_DIR`: generated frontend directory; default is `./web`.
 - `LOG_LEVEL`: `debug`, `info`, `warn`, or `error`; default is `info`.
 - `LOG_FORMAT`: `json` or `text`; default is `json`.
 
-The server writes structured logs to stderr. Every request produces one access-log line — at `error` for 5xx, `warn` for 4xx, `info` otherwise — carrying a `requestId` that is also returned in the `X-Request-ID` response header. Failures log the underlying cause; clients only receive a generic message.
+The server writes structured logs to stderr. Every request produces one access-log line — at `error` for 5xx, `warn` for 4xx, `info` otherwise — carrying a `requestId` that is also returned in the `X-Request-ID` response header. Failures log the underlying cause; clients only receive a generic message. Failed login attempts receive an in-memory progressive delay: 250 ms, doubling to a maximum of 8 seconds. A successful login resets the delay, and entries expire after 15 minutes. The delay tracker is process-local and resets when the server restarts.
 
-After the first account is created, remove the admin password from the runtime environment. User records and sessions are stored in SQLite.
+After the first admin is created, remove the admin password from the runtime environment. User records, roles, and sessions are stored in SQLite. All pages except login and its OAuth callback are authenticated.
 
 ## Docker Compose
 
@@ -62,6 +62,7 @@ The compose service binds only to `127.0.0.1:3000`. The `./data` volume contains
 Open the app behind the configured host, sign in with the bootstrap account, and use the existing Readest library import control. The personal API endpoints are available at:
 
 - `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
+- `GET /api/users`, `POST /api/users`, `DELETE /api/users/:id` (admin only)
 - `GET /api/books`, `POST /api/books`, `GET /api/books/:id`, `DELETE /api/books/:id`
 - `GET /api/books/:id/file`
 - `GET` and `PUT /api/books/:id/progress`

@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"pocikode/bookshelf/server/internal/annotations"
@@ -21,7 +23,7 @@ import (
 	"pocikode/bookshelf/server/internal/logging"
 	"pocikode/bookshelf/server/internal/progress"
 	"pocikode/bookshelf/server/internal/storage"
-	"pocikode/bookshelf/server/internal/sync"
+	booksync "pocikode/bookshelf/server/internal/sync"
 
 	"github.com/google/uuid"
 )
@@ -33,8 +35,26 @@ type API struct {
 	Books       books.Store
 	Progress    progress.Store
 	Annotations annotations.Store
-	Sync        sync.Store
+	Sync        booksync.Store
 	Logger      *slog.Logger
+	loginDelay  loginDelayTracker
+}
+
+const (
+	loginDelayBase    = 250 * time.Millisecond
+	loginDelayMaximum = 8 * time.Second
+	loginAttemptTTL   = 15 * time.Minute
+	loginAttemptLimit = 10_000
+)
+
+type loginAttempt struct {
+	failures   int
+	lastFailed time.Time
+}
+
+type loginDelayTracker struct {
+	mu       sync.Mutex
+	attempts map[string]loginAttempt
 }
 
 func New(db *sql.DB, cfg config.Config, logger *slog.Logger) *API {
@@ -44,8 +64,9 @@ func New(db *sql.DB, cfg config.Config, logger *slog.Logger) *API {
 		Books:       books.Store{DB: db},
 		Progress:    progress.Store{DB: db},
 		Annotations: annotations.Store{DB: db},
-		Sync:        sync.Store{DB: db},
+		Sync:        booksync.Store{DB: db},
 		Logger:      logger,
+		loginDelay:  loginDelayTracker{attempts: make(map[string]loginAttempt)},
 	}
 }
 
@@ -67,6 +88,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("POST /api/auth/logout", a.withAuth(a.logout))
 	mux.HandleFunc("POST /api/auth/password", a.withAuth(a.updatePassword))
 	mux.HandleFunc("GET /api/auth/me", a.me)
+	mux.HandleFunc("GET /api/users", a.withAdmin(a.listUsers))
+	mux.HandleFunc("POST /api/users", a.withAdmin(a.createUser))
+	mux.HandleFunc("DELETE /api/users/{id}", a.withAdmin(a.deleteUser))
 	mux.HandleFunc("GET /api/books", a.withAuth(a.listBooks))
 	mux.HandleFunc("POST /api/books", a.withAuth(a.uploadBook))
 	mux.HandleFunc("GET /api/books/{id}", a.withAuth(a.getBook))
@@ -88,12 +112,34 @@ func (a *API) Handler() http.Handler {
 			mux.ServeHTTP(w, r)
 			return
 		}
+		// A missing SPA shell is a deployment fault; let staticFile report it
+		// instead of replacing that diagnostic with an authentication redirect.
+		_, shellErr := os.Stat(filepath.Join(a.Config.StaticDir, "index.html"))
+		if a.DB != nil && shellErr == nil && isPageRequest(r) && !isPublicPage(r.URL.Path) {
+			if _, err := auth.LoadSession(a.DB, r); err != nil {
+				if errors.Is(err, auth.ErrNoSession) {
+					loginURL := "/auth?redirect=" + url.QueryEscape(r.URL.RequestURI())
+					http.Redirect(w, r, loginURL, http.StatusFound)
+					return
+				}
+				writeError(w, r, http.StatusInternalServerError, "could not authenticate page request", err)
+				return
+			}
+		}
 		a.staticFile(w, r)
 	})
 	// Every request — API and static alike — passes through the logging
 	// middleware, so nothing reaches a handler without a request id and
 	// nothing leaves without an access log line.
 	return logging.Middleware(a.logger(), root)
+}
+
+func isPageRequest(r *http.Request) bool {
+	return r.Method == http.MethodGet && (filepath.Ext(r.URL.Path) == "" || filepath.Ext(r.URL.Path) == ".html")
+}
+
+func isPublicPage(path string) bool {
+	return path == "/auth" || path == "/auth/" || path == "/auth/callback" || path == "/auth/callback/"
 }
 
 type contextKey string
@@ -125,6 +171,17 @@ func (a *API) withAuth(next func(http.ResponseWriter, *http.Request, auth.Sessio
 	}
 }
 
+func (a *API) withAdmin(next func(http.ResponseWriter, *http.Request, auth.Session)) http.HandlerFunc {
+	return a.withAuth(func(w http.ResponseWriter, r *http.Request, session auth.Session) {
+		if session.User.Role != auth.RoleAdmin {
+			writeError(w, r, http.StatusForbidden, "admin access required", nil,
+				slog.String("userId", session.User.ID))
+			return
+		}
+		next(w, r, session)
+	})
+}
+
 func contextWithSession(r *http.Request, session auth.Session) *http.Request {
 	return r.WithContext(context.WithValue(r.Context(), sessionKey, session))
 }
@@ -141,9 +198,19 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, r, http.StatusBadRequest, "username and password are required", nil)
 		return
 	}
+	key := loginAttemptKey(r, input.Username)
+	if delay := a.loginDelay.delay(key, time.Now()); delay > 0 {
+		timer := time.NewTimer(delay)
+		select {
+		case <-timer.C:
+		case <-r.Context().Done():
+			timer.Stop()
+			return
+		}
+	}
 	var user auth.User
 	var hash string
-	err := a.DB.QueryRow(`SELECT id, username, password_hash FROM users WHERE username = ?`, input.Username).Scan(&user.ID, &user.Username, &hash)
+	err := a.DB.QueryRow(`SELECT id, username, password_hash, role FROM users WHERE username = ?`, input.Username).Scan(&user.ID, &user.Username, &hash, &user.Role)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		// Unknown user and wrong password answer identically to the client,
@@ -151,6 +218,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		// database being down, which the branch below now reports as a 500.
 		logEvent(r, slog.LevelWarn, "login rejected: unknown user", nil,
 			slog.String("username", input.Username))
+		a.loginDelay.failed(key, time.Now())
 		writeError(w, r, http.StatusUnauthorized, "invalid credentials", nil)
 		return
 	case err != nil:
@@ -161,9 +229,11 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	if !auth.CheckPassword(hash, input.Password) {
 		logEvent(r, slog.LevelWarn, "login rejected: bad password", nil,
 			slog.String("username", input.Username), slog.String("userId", user.ID))
+		a.loginDelay.failed(key, time.Now())
 		writeError(w, r, http.StatusUnauthorized, "invalid credentials", nil)
 		return
 	}
+	a.loginDelay.succeeded(key)
 	session, err := auth.CreateSession(a.DB, user, a.Config.SecureCookie)
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "could not create session", err,
@@ -175,6 +245,79 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	logEvent(r, slog.LevelInfo, "login succeeded", nil,
 		slog.String("userId", user.ID), slog.String("username", user.Username))
 	writeJSON(w, http.StatusOK, map[string]any{"user": user})
+}
+
+func loginAttemptKey(r *http.Request, username string) string {
+	// X-Real-IP is set by the documented reverse proxy. It is intentionally not
+	// taken from X-Forwarded-For, whose value may contain client-supplied data.
+	address := r.Header.Get("X-Real-IP")
+	if address == "" {
+		address = r.RemoteAddr
+	}
+	return address + "\x00" + strings.ToLower(strings.TrimSpace(username))
+}
+
+func (t *loginDelayTracker) delay(key string, now time.Time) time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	attempt, ok := t.attempts[key]
+	if !ok || now.Sub(attempt.lastFailed) >= loginAttemptTTL {
+		if ok {
+			delete(t.attempts, key)
+		}
+		return 0
+	}
+	return loginDelayForFailures(attempt.failures)
+}
+
+func (t *loginDelayTracker) failed(key string, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.attempts == nil {
+		t.attempts = make(map[string]loginAttempt)
+	}
+	for existingKey, existing := range t.attempts {
+		if now.Sub(existing.lastFailed) >= loginAttemptTTL {
+			delete(t.attempts, existingKey)
+		}
+	}
+	if len(t.attempts) >= loginAttemptLimit {
+		var oldestKey string
+		var oldest time.Time
+		for existingKey, existing := range t.attempts {
+			if oldestKey == "" || existing.lastFailed.Before(oldest) {
+				oldestKey, oldest = existingKey, existing.lastFailed
+			}
+		}
+		delete(t.attempts, oldestKey)
+	}
+	attempt := t.attempts[key]
+	if now.Sub(attempt.lastFailed) >= loginAttemptTTL {
+		attempt.failures = 0
+	}
+	attempt.failures++
+	attempt.lastFailed = now
+	t.attempts[key] = attempt
+}
+
+func (t *loginDelayTracker) succeeded(key string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	delete(t.attempts, key)
+}
+
+func loginDelayForFailures(failures int) time.Duration {
+	if failures <= 0 {
+		return 0
+	}
+	delay := loginDelayBase
+	for i := 1; i < failures && delay < loginDelayMaximum; i++ {
+		delay *= 2
+	}
+	if delay > loginDelayMaximum {
+		return loginDelayMaximum
+	}
+	return delay
 }
 
 func (a *API) updatePassword(w http.ResponseWriter, r *http.Request, session auth.Session) {
@@ -231,6 +374,91 @@ func (a *API) me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"user": session.User})
+}
+
+func (a *API) listUsers(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	rows, err := a.DB.Query(`SELECT id, username, role, created_at FROM users ORDER BY username COLLATE NOCASE`)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not list users", err)
+		return
+	}
+	defer rows.Close()
+	type userRecord struct {
+		ID        string    `json:"id"`
+		Username  string    `json:"username"`
+		Role      auth.Role `json:"role"`
+		CreatedAt int64     `json:"createdAt"`
+	}
+	users := make([]userRecord, 0)
+	for rows.Next() {
+		var user userRecord
+		if err := rows.Scan(&user.ID, &user.Username, &user.Role, &user.CreatedAt); err != nil {
+			writeError(w, r, http.StatusInternalServerError, "could not list users", err)
+			return
+		}
+		users = append(users, user)
+	}
+	if err := rows.Err(); err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not list users", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, users)
+}
+
+func (a *API) createUser(w http.ResponseWriter, r *http.Request, _ auth.Session) {
+	var input struct {
+		Username string    `json:"username"`
+		Password string    `json:"password"`
+		Role     auth.Role `json:"role"`
+	}
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	if input.Username == "" || input.Password == "" {
+		writeError(w, r, http.StatusBadRequest, "username and password are required", nil)
+		return
+	}
+	if input.Role == "" {
+		input.Role = auth.RoleUser
+	}
+	if input.Role != auth.RoleAdmin && input.Role != auth.RoleUser {
+		writeError(w, r, http.StatusBadRequest, "role must be admin or user", nil)
+		return
+	}
+	hash, err := auth.HashPassword(input.Password)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not create user", err)
+		return
+	}
+	now := time.Now().UnixMilli()
+	user := auth.User{ID: auth.NewID(), Username: input.Username, Role: input.Role}
+	if _, err := a.DB.Exec(`INSERT INTO users (id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`, user.ID, user.Username, hash, user.Role, now, now); err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			writeError(w, r, http.StatusConflict, "username already exists", nil)
+			return
+		}
+		writeError(w, r, http.StatusInternalServerError, "could not create user", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"user": user})
+}
+
+func (a *API) deleteUser(w http.ResponseWriter, r *http.Request, session auth.Session) {
+	id := r.PathValue("id")
+	if id == session.User.ID {
+		writeError(w, r, http.StatusBadRequest, "you cannot delete your own account", nil)
+		return
+	}
+	result, err := a.DB.Exec(`DELETE FROM users WHERE id = ?`, id)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not delete user", err)
+		return
+	}
+	if count, _ := result.RowsAffected(); count == 0 {
+		writeError(w, r, http.StatusNotFound, "user not found", nil)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (a *API) listBooks(w http.ResponseWriter, r *http.Request, session auth.Session) {

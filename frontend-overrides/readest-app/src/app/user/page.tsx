@@ -107,6 +107,11 @@ const ProfilePage = () => {
                   onConfirmDelete={handleDeleteWithMessage}
                   onConfirmDeleteAllBooks={handleDeleteAllBooksWithMessage}
                 />
+                {user.user_metadata?.['role'] === 'admin' && (
+                  <button className='btn btn-contrast self-start rounded-lg' onClick={() => router.push('/admin/users')}>
+                    {_('Manage users')}
+                  </button>
+                )}
               </div>
 
               <LegalLinks />

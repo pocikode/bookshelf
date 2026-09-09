@@ -79,7 +79,7 @@ Progress is local-first in the browser and sent through a debounce/lifecycle-awa
 
 ## Authentication and Security
 
-Login creates a server-side session represented by an HTTP-only cookie. Session tokens are stored hashed. Cookies are `Secure` in production and use `SameSite=Lax`. State-changing cookie-authenticated requests require a CSRF token and same-origin checks where configured.
+Login creates a server-side session represented by an HTTP-only cookie. Session tokens are stored hashed. Users have exactly one of the `admin` or `user` roles; user management endpoints require `admin`. Failed login attempts from a source/username pair receive an in-memory progressive delay from 250 ms up to 8 seconds; successful login resets it and entries expire after 15 minutes. Cookies are `Secure` in production and use `SameSite=Lax`. State-changing cookie-authenticated requests require a CSRF token and same-origin checks where configured. Static page requests are redirected to login unless they target the login route or OAuth callback.
 
 Uploads are bounded, written to a temporary file, validated as EPUB/PDF, hashed, renamed using a server-generated ID, and then recorded in SQLite. Client filenames are metadata only. File endpoints use the database row's server-controlled path and support range streaming, ETag, length, content type, and last-modified headers.
 

@@ -3,6 +3,11 @@ import { personalRequest } from './apiClient';
 export interface PersonalUser {
   id: string;
   username: string;
+  role: 'admin' | 'user';
+}
+
+export interface PersonalManagedUser extends PersonalUser {
+  createdAt: number;
 }
 
 export const personalLogin = (username: string, password: string) =>
@@ -18,3 +23,12 @@ export const personalChangePassword = (password: string) =>
     method: 'POST',
     body: JSON.stringify({ password }),
   });
+
+export const personalListUsers = () => personalRequest<PersonalManagedUser[]>('/users');
+export const personalCreateUser = (username: string, password: string, role: PersonalUser['role']) =>
+  personalRequest<{ user: PersonalUser }>('/users', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, role }),
+  });
+export const personalDeleteUser = (id: string) =>
+  personalRequest<void>(`/users/${encodeURIComponent(id)}`, { method: 'DELETE' });

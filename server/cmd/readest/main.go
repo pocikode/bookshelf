@@ -141,14 +141,17 @@ func getenv(key, fallback string) string {
 
 func bootstrapUser(db *sql.DB) error {
 	username, password := os.Getenv("ADMIN_USERNAME"), os.Getenv("ADMIN_PASSWORD")
-	if username == "" || password == "" {
+	if (username == "") != (password == "") {
+		return fmt.Errorf("ADMIN_USERNAME and ADMIN_PASSWORD must be set together")
+	}
+	if username == "" {
 		return nil
 	}
-	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count); err != nil {
-		return fmt.Errorf("count users: %w", err)
+	var admins int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin'`).Scan(&admins); err != nil {
+		return fmt.Errorf("count admin users: %w", err)
 	}
-	if count > 0 {
+	if admins > 0 {
 		return nil
 	}
 	hash, err := auth.HashPassword(password)
@@ -156,7 +159,7 @@ func bootstrapUser(db *sql.DB) error {
 		return fmt.Errorf("hash bootstrap password: %w", err)
 	}
 	now := time.Now().UnixMilli()
-	if _, err := db.Exec(`INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, auth.NewID(), username, hash, now, now); err != nil {
+	if _, err := db.Exec(`INSERT INTO users (id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, 'admin', ?, ?)`, auth.NewID(), username, hash, now, now); err != nil {
 		return fmt.Errorf("insert bootstrap user %q: %w", username, err)
 	}
 	slog.Info("bootstrap admin user created", slog.String("username", username))

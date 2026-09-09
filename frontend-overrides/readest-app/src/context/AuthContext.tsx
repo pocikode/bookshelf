@@ -63,7 +63,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       personalMe()
         .then(({ user }) => {
           setToken(PERSONAL_SESSION_TOKEN);
-          setUser({ id: user.id, email: user.username } as User);
+          setUser({ id: user.id, email: user.username, user_metadata: { role: user.role } } as unknown as User);
         })
         .catch(() => {
           setToken(null);
@@ -145,7 +145,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const personalLogin = useCallback((newUser: PersonalUser) => {
     setToken(PERSONAL_SESSION_TOKEN);
-    setUser({ id: newUser.id, email: newUser.username } as User);
+    setUser({ id: newUser.id, email: newUser.username, user_metadata: { role: newUser.role } } as unknown as User);
   }, []);
 
   const refresh = useCallback(async () => {

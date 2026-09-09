@@ -42,5 +42,45 @@ func Open(path string) (*DB, error) {
 		db.Close()
 		return nil, fmt.Errorf("migration: %w", err)
 	}
+	if err := ensureUserRole(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("user role migration: %w", err)
+	}
 	return &DB{DB: db}, nil
+}
+
+func ensureUserRole(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(users)`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	var hasRole bool
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			return err
+		}
+		if name == "role" {
+			hasRole = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if !hasRole {
+		if _, err := db.Exec(`ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user' CHECK(role IN ('admin', 'user'))`); err != nil {
+			return err
+		}
+	}
+	// Databases created before roles existed have one initial account. Preserve
+	// its access by making that account the first administrator.
+	if _, err := db.Exec(`UPDATE users SET role = 'admin' WHERE id = (SELECT id FROM users ORDER BY created_at, id LIMIT 1) AND NOT EXISTS (SELECT 1 FROM users WHERE role = 'admin')`); err != nil {
+		return err
+	}
+	_, err = db.Exec(`INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (2, unixepoch() * 1000)`)
+	return err
 }

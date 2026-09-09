@@ -15,6 +15,13 @@ import (
 
 const sessionCookie = "readest_session"
 
+type Role string
+
+const (
+	RoleAdmin Role = "admin"
+	RoleUser  Role = "user"
+)
+
 // ErrNoSession marks the ordinary "this request is not logged in" outcome:
 // no cookie, an unknown token, or an expired one. Anything not matching it —
 // a database failure during lookup — is an operational error and must be
@@ -24,6 +31,7 @@ var ErrNoSession = errors.New("not authenticated")
 type User struct {
 	ID       string `json:"id"`
 	Username string `json:"username"`
+	Role     Role   `json:"role"`
 }
 
 type Session struct {
@@ -77,7 +85,7 @@ func LoadSession(db Store, r *http.Request) (Session, error) {
 	}
 	var session Session
 	var expires int64
-	err = db.QueryRow(`SELECT s.token_hash, s.csrf_hash, s.expires_at, u.id, u.username FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`, hashToken(cookie.Value)).Scan(&session.TokenHash, &session.CSRFToken, &expires, &session.User.ID, &session.User.Username)
+	err = db.QueryRow(`SELECT s.token_hash, s.csrf_hash, s.expires_at, u.id, u.username, u.role FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ?`, hashToken(cookie.Value)).Scan(&session.TokenHash, &session.CSRFToken, &expires, &session.User.ID, &session.User.Username, &session.User.Role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNoSession
 	}
