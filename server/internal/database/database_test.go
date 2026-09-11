@@ -7,7 +7,7 @@ import (
 )
 
 func TestOpenAppliesSQLiteSettingsAndSchema(t *testing.T) {
-	db, err := Open(filepath.Join(t.TempDir(), "app.sqlite"))
+	db, err := Open(filepath.Join(t.TempDir(), "bookshelf.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

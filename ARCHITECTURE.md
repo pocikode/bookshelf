@@ -24,11 +24,14 @@ Nginx on host, TLS termination
 One Docker container on 127.0.0.1:3000
   |- Go net/http server
   |- generated Readest frontend assets
-  |- SQLite /data/app.sqlite
-  `- ebook files /data/books/
+  |- SQLite /data/bookshelf.db
+  |- books /data/books/<hash-shard>/
+  |- covers /data/covers/<hash-shard>/
+  |- temporary uploads /data/uploads/
+  `- reserved trash /data/trash/
 ```
 
-The Go server is the only production application server. It serves API routes under `/api/`, streams authenticated book files, and falls back to the frontend entry point for client-side routes. Nginx is outside the image. The backend currently has the core auth, upload, metadata, progress, annotation, and sync primitives; the remaining full Readest data synchronization and mutation adapters are intentionally isolated as follow-up integration work.
+The Go server is the only production application server. It serves API routes under `/api/`, streams authenticated book files, and falls back to the frontend entry point for client-side routes. Nginx is outside the image. The personal frontend is wired to the backend for library loading, upload, metadata updates, visibility, deletion, progress, bookmarks, and annotations. The generic cursor sync endpoint remains available for clients that need it, but the current personal reader uses the dedicated entity endpoints.
 
 ## Frontend Baseline
 
@@ -43,7 +46,7 @@ Readest is a Next.js 16 + React 19 application with both App Router and Pages Ro
 - `BookConfig.location` and `BookProgress.location` carry Readest's CFI locator representation.
 - `BookConfig.booknotes` stores bookmarks and annotations as `BookNote` records. Bookmark notes use `type: 'bookmark'`; highlights and notes use Readest's annotation representation and soft deletion.
 
-The personal integration must adapt these existing records rather than introduce a competing reader model. The backend stores locators as opaque JSON or the equivalent serialized Readest payload and does not render EPUB/PDF content. Remote book URL materialization currently uses the server file endpoint; complete local IndexedDB caching and native Readest import/upload translation remain follow-up work.
+The personal integration adapts these existing records rather than introducing a competing reader model. The backend stores locators as opaque JSON or the equivalent serialized Readest payload and does not render EPUB/PDF content. Remote book URL materialization uses the server file and cover endpoints; the personal browser path streams files rather than maintaining a second server-side reader cache.
 
 ## Web Build and Static Serving
 
@@ -67,7 +70,7 @@ The backend lives under `server/` in the root Go module. It uses `net/http`, `da
 - `internal/sync`: cursor-based change log and latest-version conflict policy.
 - `internal/httpapi`: routing, authentication middleware, JSON responses, streaming, and static fallback.
 
-SQLite is initialized at `/data/app.sqlite` and uses WAL mode, foreign keys, and a five-second busy timeout. The only persistent directory is `/data`; binaries are never stored in SQLite.
+SQLite is initialized at `/data/bookshelf.db` and uses WAL mode, foreign keys, and a five-second busy timeout. The `/data` volume is persistent; binaries are stored under content-addressed `books/` and `covers/` directories rather than in SQLite. `uploads/` holds temporary files and `trash/` is reserved for future cleanup workflows.
 
 ## Data and Sync Model
 
@@ -81,7 +84,7 @@ Progress is local-first in the browser and sent through a debounce/lifecycle-awa
 
 Login creates a server-side session represented by an HTTP-only cookie. Session tokens are stored hashed. Users have exactly one of the `admin` or `user` roles; user management endpoints require `admin`. Failed login attempts from a source/username pair receive an in-memory progressive delay from 250 ms up to 8 seconds; successful login resets it and entries expire after 15 minutes. Cookies are `Secure` in production and use `SameSite=Lax`. State-changing cookie-authenticated requests require a CSRF token and same-origin checks where configured. Static page requests are redirected to login unless they target the login route or OAuth callback.
 
-Uploads are bounded, written to a temporary file, validated as EPUB/PDF, hashed, renamed using a server-generated ID, and then recorded in SQLite. Client filenames are metadata only. File endpoints use the database row's server-controlled path and support range streaming, ETag, length, content type, and last-modified headers.
+Uploads are bounded, written to `uploads/`, validated as EPUB/PDF, SHA-256 hashed, and moved to `books/<hash-shard>/<sha256>.<ext>` before being recorded in SQLite. Covers are validated, written temporarily, and stored at `covers/<hash-shard>/<sha256>.<image-ext>`. Client filenames are metadata only. File endpoints resolve database paths within `DATA_DIR` and support range streaming, ETag, length, content type, and last-modified headers. Existing absolute paths inside `DATA_DIR` remain readable for older databases; new records use relative paths.
 
 ## Maintainability Rules
 

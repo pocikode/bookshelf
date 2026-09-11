@@ -64,8 +64,11 @@ func Load() (Config, error) {
 	}, nil
 }
 
-func (c Config) DatabasePath() string { return filepath.Join(c.DataDir, "app.sqlite") }
+func (c Config) DatabasePath() string { return filepath.Join(c.DataDir, "bookshelf.db") }
 func (c Config) BooksDir() string     { return filepath.Join(c.DataDir, "books") }
+func (c Config) CoversDir() string    { return filepath.Join(c.DataDir, "covers") }
+func (c Config) UploadsDir() string   { return filepath.Join(c.DataDir, "uploads") }
+func (c Config) TrashDir() string     { return filepath.Join(c.DataDir, "trash") }
 
 func getenv(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {

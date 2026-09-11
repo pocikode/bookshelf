@@ -60,7 +60,7 @@ type loginDelayTracker struct {
 func New(db *sql.DB, cfg config.Config, logger *slog.Logger) *API {
 	return &API{
 		DB: db, Config: cfg,
-		Files:       storage.FileStore{Root: cfg.BooksDir(), MaxUpload: cfg.MaxUpload},
+		Files:       storage.FileStore{Root: cfg.DataDir, MaxUpload: cfg.MaxUpload},
 		Books:       books.Store{DB: db},
 		Progress:    progress.Store{DB: db},
 		Annotations: annotations.Store{DB: db},
@@ -524,30 +524,28 @@ func (a *API) uploadBook(w http.ResponseWriter, r *http.Request, session auth.Se
 	if err == nil {
 		defer cover.Close()
 		uploaded.CoverPath, err = a.Files.SaveCover(cover, uploaded.Path)
+		uploaded.CoverCreated = uploaded.Created
 		if errors.Is(err, storage.ErrRejected) {
-			a.removeFile(r, uploaded.Path)
+			a.removeUploaded(r, uploaded)
 			writeError(w, r, http.StatusUnsupportedMediaType, err.Error(), nil,
 				slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
 			return
 		}
 		if err != nil {
-			a.removeFile(r, uploaded.Path)
+			a.removeUploaded(r, uploaded)
 			writeError(w, r, http.StatusInternalServerError, "could not store cover", err,
 				slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
 			return
 		}
 	} else if !errors.Is(err, http.ErrMissingFile) {
-		a.removeFile(r, uploaded.Path)
+		a.removeUploaded(r, uploaded)
 		writeError(w, r, http.StatusBadRequest, "invalid cover", err,
 			slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
 		return
 	}
 	metadata := json.RawMessage(r.FormValue("metadata"))
 	if len(metadata) > 0 && !json.Valid(metadata) {
-		a.removeFile(r, uploaded.Path)
-		if uploaded.CoverPath != "" {
-			a.removeFile(r, uploaded.CoverPath)
-		}
+		a.removeUploaded(r, uploaded)
 		writeError(w, r, http.StatusBadRequest, "metadata must be JSON", nil,
 			slog.String("userId", session.User.ID))
 		return
@@ -558,10 +556,7 @@ func (a *API) uploadBook(w http.ResponseWriter, r *http.Request, session auth.Se
 	}
 	book, err := a.Books.Create(session.User.ID, books.Uploaded{Path: uploaded.Path, CoverPath: uploaded.CoverPath, OriginalName: uploaded.OriginalName, MimeType: uploaded.MimeType, Size: uploaded.Size, Hash: uploaded.Hash}, title, r.FormValue("author"), metadata)
 	if err != nil {
-		a.removeFile(r, uploaded.Path)
-		if uploaded.CoverPath != "" {
-			a.removeFile(r, uploaded.CoverPath)
-		}
+		a.removeUploaded(r, uploaded)
 		writeError(w, r, http.StatusInternalServerError, "could not save book", err,
 			slog.String("userId", session.User.ID), slog.String("filename", header.Filename))
 		return
@@ -649,27 +644,33 @@ func (a *API) bookFile(w http.ResponseWriter, r *http.Request, session auth.Sess
 			slog.String("userId", session.User.ID), slog.String("bookId", id))
 		return
 	}
-	file, err := os.Open(book.Path)
+	filePath, err := a.Files.Resolve(book.Path)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not read book file", err,
+			slog.String("userId", session.User.ID), slog.String("bookId", id))
+		return
+	}
+	file, err := os.Open(filePath)
 	if errors.Is(err, os.ErrNotExist) {
 		// A row without its file is a data-integrity problem, not a normal 404.
 		writeError(w, r, http.StatusNotFound, "book file not found",
 			fmt.Errorf("open book file: %w", err),
 			slog.String("userId", session.User.ID), slog.String("bookId", id),
-			slog.String("path", book.Path))
+			slog.String("path", filePath))
 		return
 	}
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "could not read book file",
 			fmt.Errorf("open book file: %w", err),
 			slog.String("userId", session.User.ID), slog.String("bookId", id),
-			slog.String("path", book.Path))
+			slog.String("path", filePath))
 		return
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "could not read book file",
-			fmt.Errorf("stat book file %s: %w", book.Path, err),
+			fmt.Errorf("stat book file %s: %w", filePath, err),
 			slog.String("userId", session.User.ID), slog.String("bookId", id))
 		return
 	}
@@ -692,8 +693,14 @@ func (a *API) bookCover(w http.ResponseWriter, r *http.Request, session auth.Ses
 			slog.String("userId", session.User.ID), slog.String("bookId", id))
 		return
 	}
+	coverPath, err := a.Files.Resolve(book.CoverPath)
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "could not read cover", err,
+			slog.String("userId", session.User.ID), slog.String("bookId", id))
+		return
+	}
 	w.Header().Set("Cache-Control", "private, max-age=3600")
-	http.ServeFile(w, r, book.CoverPath)
+	http.ServeFile(w, r, coverPath)
 }
 
 func (a *API) getProgress(w http.ResponseWriter, r *http.Request, session auth.Session) {
@@ -1049,6 +1056,18 @@ func logEvent(r *http.Request, level slog.Level, message string, cause error, at
 func (a *API) removeFile(r *http.Request, path string) {
 	if err := a.Files.Remove(path); err != nil {
 		logEvent(r, slog.LevelError, "could not remove book file", err, slog.String("path", path))
+	}
+}
+
+func (a *API) removeUploaded(r *http.Request, uploaded storage.UploadedFile) {
+	// A content-addressed file may already belong to another database row. Do
+	// not remove it while rolling back a failed duplicate upload.
+	if !uploaded.Created {
+		return
+	}
+	a.removeFile(r, uploaded.Path)
+	if uploaded.CoverPath != "" && uploaded.CoverCreated {
+		a.removeFile(r, uploaded.CoverPath)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,8 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/google/uuid"
 )
 
 // ErrRejected marks an upload the client got wrong (format, MIME, size, a
@@ -24,6 +23,8 @@ var ErrRejected = errors.New("rejected upload")
 const maxCoverSize = 20 << 20
 
 type FileStore struct {
+	// Root is DATA_DIR. Stored paths are relative to it so the database can
+	// move with the data volume between hosts.
 	Root      string
 	MaxUpload int64
 }
@@ -35,6 +36,8 @@ type UploadedFile struct {
 	MimeType     string
 	Size         int64
 	Hash         string
+	Created      bool
+	CoverCreated bool
 }
 
 func (s FileStore) Save(r io.Reader, name, contentType string) (UploadedFile, error) {
@@ -45,12 +48,13 @@ func (s FileStore) Save(r io.Reader, name, contentType string) (UploadedFile, er
 	if contentType != "" && contentType != "application/epub+zip" && contentType != "application/pdf" && contentType != "application/octet-stream" {
 		return UploadedFile{}, fmt.Errorf("%w: unsupported MIME type %q", ErrRejected, contentType)
 	}
-	if err := os.MkdirAll(s.Root, 0o750); err != nil {
-		return UploadedFile{}, fmt.Errorf("create books dir %s: %w", s.Root, err)
+	uploadsRoot := filepath.Join(s.Root, "uploads")
+	if err := os.MkdirAll(uploadsRoot, 0o750); err != nil {
+		return UploadedFile{}, fmt.Errorf("create uploads dir %s: %w", uploadsRoot, err)
 	}
-	tmp, err := os.CreateTemp(s.Root, ".upload-*")
+	tmp, err := os.CreateTemp(uploadsRoot, ".upload-*")
 	if err != nil {
-		return UploadedFile{}, fmt.Errorf("create temp upload in %s: %w", s.Root, err)
+		return UploadedFile{}, fmt.Errorf("create temp upload in %s: %w", uploadsRoot, err)
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
@@ -80,26 +84,29 @@ func (s FileStore) Save(r io.Reader, name, contentType string) (UploadedFile, er
 	if contentType == "" || contentType == "application/octet-stream" {
 		contentType = validType
 	}
-	id := uuid.NewString()
-	finalName := id + ext
-	finalPath := filepath.Join(s.Root, finalName)
+	hashValue := hex.EncodeToString(hash.Sum(nil))
+	shard := hashValue[:2]
+	booksRoot := filepath.Join(s.Root, "books", shard)
+	if err := os.MkdirAll(booksRoot, 0o750); err != nil {
+		return UploadedFile{}, fmt.Errorf("create book shard %s: %w", booksRoot, err)
+	}
+	finalName := hashValue + ext
+	finalPath := filepath.Join(booksRoot, finalName)
+	if _, err := os.Stat(finalPath); err == nil {
+		return UploadedFile{Path: filepath.Join("books", shard, finalName), OriginalName: filepath.Base(name), MimeType: contentType, Size: size, Hash: hashValue}, nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return UploadedFile{}, fmt.Errorf("check stored upload %s: %w", finalPath, err)
+	}
 	if err := os.Rename(tmpName, finalPath); err != nil {
 		return UploadedFile{}, fmt.Errorf("move upload to %s: %w", finalPath, err)
 	}
-	return UploadedFile{Path: finalPath, OriginalName: filepath.Base(name), MimeType: contentType, Size: size, Hash: fmt.Sprintf("%x", hash.Sum(nil))}, nil
+	return UploadedFile{Path: filepath.Join("books", shard, finalName), OriginalName: filepath.Base(name), MimeType: contentType, Size: size, Hash: hashValue, Created: true}, nil
 }
 
 func (s FileStore) Remove(path string) error {
-	cleanRoot, err := filepath.Abs(s.Root)
+	cleanPath, err := s.Resolve(path)
 	if err != nil {
-		return fmt.Errorf("resolve books root %s: %w", s.Root, err)
-	}
-	cleanPath, err := filepath.Abs(path)
-	if err != nil {
-		return fmt.Errorf("resolve book path %s: %w", path, err)
-	}
-	if filepath.Dir(cleanPath) != cleanRoot {
-		return fmt.Errorf("unsafe book path %s: outside %s", cleanPath, cleanRoot)
+		return err
 	}
 	if err := os.Remove(cleanPath); err != nil {
 		return fmt.Errorf("remove book file %s: %w", cleanPath, err)
@@ -108,16 +115,9 @@ func (s FileStore) Remove(path string) error {
 }
 
 func (s FileStore) SaveCover(r io.Reader, bookPath string) (string, error) {
-	cleanRoot, err := filepath.Abs(s.Root)
+	cleanBookPath, err := s.Resolve(bookPath)
 	if err != nil {
-		return "", fmt.Errorf("resolve books root %s: %w", s.Root, err)
-	}
-	cleanBookPath, err := filepath.Abs(bookPath)
-	if err != nil {
-		return "", fmt.Errorf("resolve book path %s: %w", bookPath, err)
-	}
-	if filepath.Dir(cleanBookPath) != cleanRoot {
-		return "", fmt.Errorf("unsafe book path %s: outside %s", cleanBookPath, cleanRoot)
+		return "", err
 	}
 
 	header := make([]byte, 512)
@@ -139,9 +139,13 @@ func (s FileStore) SaveCover(r io.Reader, bookPath string) (string, error) {
 		return "", fmt.Errorf("%w: unsupported cover image", ErrRejected)
 	}
 
-	tmp, err := os.CreateTemp(s.Root, ".cover-*")
+	uploadsRoot := filepath.Join(s.Root, "uploads")
+	if err := os.MkdirAll(uploadsRoot, 0o750); err != nil {
+		return "", fmt.Errorf("create uploads dir %s: %w", uploadsRoot, err)
+	}
+	tmp, err := os.CreateTemp(uploadsRoot, ".cover-*")
 	if err != nil {
-		return "", fmt.Errorf("create temporary cover in %s: %w", s.Root, err)
+		return "", fmt.Errorf("create temporary cover in %s: %w", uploadsRoot, err)
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName)
@@ -158,12 +162,56 @@ func (s FileStore) SaveCover(r io.Reader, bookPath string) (string, error) {
 		return "", fmt.Errorf("close cover %s: %w", tmpName, err)
 	}
 
-	bookExt := filepath.Ext(cleanBookPath)
-	coverPath := strings.TrimSuffix(cleanBookPath, bookExt) + ".cover" + ext
+	bookHash := strings.TrimSuffix(filepath.Base(cleanBookPath), filepath.Ext(cleanBookPath))
+	if len(bookHash) != sha256.Size*2 {
+		return "", fmt.Errorf("invalid stored book path %s", bookPath)
+	}
+	coverDir := filepath.Join(s.Root, "covers", bookHash[:2])
+	if err := os.MkdirAll(coverDir, 0o750); err != nil {
+		return "", fmt.Errorf("create cover shard %s: %w", coverDir, err)
+	}
+	coverName := bookHash + ext
+	coverPath := filepath.Join(coverDir, coverName)
+	if _, err := os.Stat(coverPath); err == nil {
+		return filepath.Join("covers", bookHash[:2], coverName), nil
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("check stored cover %s: %w", coverPath, err)
+	}
 	if err := os.Rename(tmpName, coverPath); err != nil {
 		return "", fmt.Errorf("move cover to %s: %w", coverPath, err)
 	}
-	return coverPath, nil
+	return filepath.Join("covers", bookHash[:2], coverName), nil
+}
+
+// Resolve turns a database path into an absolute path while keeping it inside
+// DATA_DIR. Absolute paths are accepted for databases created before paths
+// became relative, but new paths are always relative.
+func (s FileStore) Resolve(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("empty stored path")
+	}
+	root, err := filepath.Abs(s.Root)
+	if err != nil {
+		return "", fmt.Errorf("resolve data root %s: %w", s.Root, err)
+	}
+	candidates := []string{path}
+	if !filepath.IsAbs(path) {
+		candidates = []string{filepath.Join(root, path)}
+		if absolute, absErr := filepath.Abs(path); absErr == nil {
+			candidates = append(candidates, absolute)
+		}
+	}
+	for _, candidate := range candidates {
+		clean, err := filepath.Abs(candidate)
+		if err != nil {
+			continue
+		}
+		rel, err := filepath.Rel(root, clean)
+		if err == nil && rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return clean, nil
+		}
+	}
+	return "", fmt.Errorf("unsafe stored path %s: outside %s", path, root)
 }
 
 func validateBook(file *os.File, ext string) (string, error) {

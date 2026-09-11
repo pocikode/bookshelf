@@ -2,7 +2,20 @@
 
 Bookshelf is a self-hosted Readest integration with the existing Readest web reader and library UI, plus a small Go/SQLite service for a shared library, authentication, ebook storage, and synchronization. Readest is pinned as the `readest/` Git submodule; the parent repository tracks only integration overrides.
 
-The frontend remains the Readest frontend. EPUB and PDF files are streamed to the browser and rendered by the existing Foliate/PDF reader. The production container runs one Go process and contains no Node.js or Bun runtime.
+The frontend remains the Readest frontend. In personal mode, the library loads from the Go API, EPUB/PDF uploads include extracted metadata and covers when available, and book files are streamed to the browser for the existing Foliate/PDF reader. The production container runs one Go process and contains no Node.js or Bun runtime.
+
+## Current Status
+
+The personal deployment currently supports:
+
+- Session-cookie authentication with CSRF protection and admin/user roles.
+- Library listing and search, EPUB/PDF upload, metadata and cover extraction, metadata editing, visibility changes, and deletion.
+- Authenticated EPUB/PDF file streaming with range requests and ETags.
+- Reading progress synchronization through the personal API.
+- Bookmark, highlight, and note synchronization through the personal API.
+- User administration for admins.
+
+The standalone `/api/sync` cursor endpoint is available for sync clients, while the current personal reader integration uses the dedicated progress, bookmark, and annotation endpoints directly.
 
 ## Local Development
 
@@ -32,7 +45,7 @@ For frontend-only work, run `bun run prepare:frontend` followed by `bun --cwd .b
 
 ## Environment Variables
 
-- `DATA_DIR`: persistent data directory, `/data` in Docker.
+- `DATA_DIR`: persistent data directory, `/data` in Docker. It contains the SQLite database and storage directories described below.
 - `PORT`: HTTP port, normally `3000`.
 - `SESSION_SECRET`: required when `ENV=production`.
 - `ENV`: set to `production` to enable secure cookies.
@@ -55,22 +68,41 @@ docker compose up -d
 curl http://127.0.0.1:3000/api/health
 ```
 
-The compose service binds only to `127.0.0.1:3000`. The `./data` volume contains `/data/app.sqlite` and `/data/books/` and survives container replacement.
+The compose service binds only to `127.0.0.1:3000`. The `./data` volume survives container replacement and should not be exposed as a web root.
+
+## Data Layout
+
+`DATA_DIR` uses relative database paths and content-addressed file storage:
+
+```text
+data/
+├── bookshelf.db
+├── books/
+│   └── <first-two-hash-characters>/<sha256>.<epub-or-pdf>
+├── covers/
+│   └── <first-two-hash-characters>/<sha256>.<image-extension>
+├── uploads/    # temporary upload files; normally empty
+└── trash/      # reserved for future retention/cleanup workflows
+```
+
+Book files are SHA-256 addressed and sharded by their first two hash characters. Covers use the same hash and shard as their book. Original filenames are stored as metadata and are not used as filesystem paths. Do not rename or delete files manually while they are referenced by the database.
 
 ## Upload and Reading
 
 Open the app behind the configured host, sign in with the bootstrap account, and use the existing Readest library import control. The personal API endpoints are available at:
 
-- `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`
+- `GET /api/health`
+- `POST /api/auth/login`, `POST /api/auth/logout`, `POST /api/auth/password`, `GET /api/auth/me`
 - `GET /api/users`, `POST /api/users`, `DELETE /api/users/:id` (admin only)
-- `GET /api/books`, `POST /api/books`, `GET /api/books/:id`, `DELETE /api/books/:id`
+- `GET /api/books`, `POST /api/books`, `GET /api/books/:id`, `PUT /api/books/:id`, `DELETE /api/books/:id`
 - `GET /api/books/:id/file`
+- `GET /api/books/:id/cover`
 - `GET` and `PUT /api/books/:id/progress`
-- `GET` and `POST /api/books/:id/bookmarks`
-- `GET` and `POST /api/books/:id/annotations`
+- `GET`, `PUT`, and `DELETE /api/books/:id/bookmarks`
+- `GET`, `PUT`, and `DELETE /api/books/:id/annotations`
 - `GET` and `POST /api/sync`
 
-The current personal integration preserves the Readest library and reader seams. Further UI wiring for native import controls and complete bookmark/annotation mutation adapters should be completed before treating the deployment as the final acceptance build.
+The personal integration uses the existing Readest library import control and reader seams. Native/Tauri import behavior remains upstream functionality; personal browser uploads go through the same-origin Go API.
 
 ## Nginx
 
@@ -84,10 +116,15 @@ The workflow in `.github/workflows/ci.yml` runs Bun install with the frozen lock
 
 ## Backup
 
-Back up both the SQLite database and ebook directory while the service is stopped or during a filesystem snapshot:
+Back up the database and stored files while the service is stopped or during a filesystem snapshot. Stopping the service lets SQLite checkpoint its WAL files before the archive is created:
 
 ```bash
+docker compose stop
+tar -czf "bookshelf-backup-$(date +%Y%m%d).tar.gz" -C data bookshelf.db books covers
+docker compose start
 ```
+
+The `uploads/` directory is temporary and normally does not need to be backed up. Include it only if an upload is actively being recovered. The `trash/` directory is reserved and is currently not part of the deletion workflow.
 
 Do not commit `data/`, ebook binaries, session secrets, or local environment files.
 

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -44,11 +43,12 @@ func run() int {
 	logger = logging.New(cfg.LogLevel, cfg.LogFormat)
 	slog.SetDefault(logger)
 
-	booksDir := filepath.Join(cfg.DataDir, "books")
-	if err := os.MkdirAll(booksDir, 0o750); err != nil {
-		logger.Error("could not create books directory",
-			slog.String("path", booksDir), slog.String("error", err.Error()))
-		return 1
+	for _, dir := range []string{cfg.BooksDir(), cfg.CoversDir(), cfg.UploadsDir(), cfg.TrashDir()} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			logger.Error("could not create data directory",
+				slog.String("path", dir), slog.String("error", err.Error()))
+			return 1
+		}
 	}
 	db, err := database.Open(cfg.DatabasePath())
 	if err != nil {

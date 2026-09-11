@@ -22,8 +22,8 @@
 
 ## Architecture and runtime traps
 
-- The production entrypoint is `server/cmd/readest`; `server/internal/httpapi` composes stores and owns `/api/*` routing plus static SPA fallback. Persistent state is `DATA_DIR/app.sqlite` and `DATA_DIR/books/`.
-- Normal backend startup loads `.env` from the current working directory. `ENV=production` requires `SESSION_SECRET`; bootstrap credentials create a user only when both are set and the users table is empty.
+- The production entrypoint is `server/cmd/readest`; `server/internal/httpapi` composes stores and owns `/api/*` routing plus static SPA fallback. Persistent state is `DATA_DIR/bookshelf.db`, `DATA_DIR/books/`, and `DATA_DIR/covers/`; `DATA_DIR/uploads/` is temporary and `DATA_DIR/trash/` is reserved.
+- Normal backend startup loads `.env` from the current working directory. `ENV=production` requires `SESSION_SECRET`; bootstrap credentials create an admin when both are set and no admin exists. Existing pre-role databases promote their oldest account to admin during startup.
 - The executable schema source is embedded `server/internal/database/schema.sql`. Keep operator-facing `server/migrations/001_init.sql` synchronized; there is no migration-file runner.
 - The Go server is the only production process. The root `Dockerfile` builds static Readest output and a CGO-disabled Go binary; the runtime contains neither Bun nor Node. API requests never fall through to the SPA.
 - The personal browser API boundary is same-origin `/api/*`; keep calls under `frontend-overrides/readest-app/src/services/personal/` rather than coupling components directly to endpoints.
