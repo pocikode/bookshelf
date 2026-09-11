@@ -38,7 +38,7 @@ const USE_APPLE_SIGN_IN = process.env['NEXT_PUBLIC_USE_APPLE_SIGN_IN'] === 'true
 export default function AuthPage() {
   const _ = useTranslation();
   const router = useRouter();
-  const { login } = useAuth();
+  const { login, isAuthLoading, token, user } = useAuth();
   const { envConfig, appService } = useEnv();
   const { safeAreaInsets, isRoundedWindow } = useThemeStore();
   const { isTrafficLightVisible } = useTrafficLightStore();
@@ -283,6 +283,13 @@ export default function AuthPage() {
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (isAuthLoading || !token || !user) return;
+
+    const redirectTo = new URLSearchParams(window.location.search).get('redirect');
+    router.replace(redirectTo ?? '/library');
+  }, [isAuthLoading, router, token, user]);
 
   if (!isMounted) {
     return null;
