@@ -94,6 +94,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/books", a.withAuth(a.listBooks))
 	mux.HandleFunc("POST /api/books", a.withAuth(a.uploadBook))
 	mux.HandleFunc("GET /api/books/{id}", a.withAuth(a.getBook))
+	mux.HandleFunc("PUT /api/books/{id}", a.withAuth(a.updateBook))
 	mux.HandleFunc("DELETE /api/books/{id}", a.withAuth(a.deleteBook))
 	mux.HandleFunc("GET /api/books/{id}/file", a.withAuth(a.bookFile))
 	mux.HandleFunc("GET /api/books/{id}/cover", a.withAuth(a.bookCover))
@@ -571,9 +572,48 @@ func (a *API) uploadBook(w http.ResponseWriter, r *http.Request, session auth.Se
 	writeJSON(w, http.StatusCreated, book)
 }
 
+type updateBookInput struct {
+	Title      string          `json:"title"`
+	Author     string          `json:"author"`
+	Metadata   json.RawMessage `json:"metadata"`
+	Visibility string          `json:"visibility"`
+}
+
+func (a *API) updateBook(w http.ResponseWriter, r *http.Request, session auth.Session) {
+	var input updateBookInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, r, http.StatusBadRequest, "invalid book update", err,
+			slog.String("userId", session.User.ID), slog.String("bookId", r.PathValue("id")))
+		return
+	}
+	if input.Title == "" {
+		writeError(w, r, http.StatusBadRequest, "title is required", nil)
+		return
+	}
+	if input.Visibility == "" {
+		input.Visibility = "public"
+	}
+	book, err := a.Books.Update(session.User.ID, r.PathValue("id"), input.Title, input.Author, input.Visibility, input.Metadata)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, r, http.StatusNotFound, "book not found", nil,
+			slog.String("userId", session.User.ID), slog.String("bookId", r.PathValue("id")))
+		return
+	}
+	if err != nil {
+		status := http.StatusInternalServerError
+		if strings.HasPrefix(err.Error(), "invalid visibility") || strings.HasPrefix(err.Error(), "metadata must be JSON") {
+			status = http.StatusBadRequest
+		}
+		writeError(w, r, status, "could not update book", err,
+			slog.String("userId", session.User.ID), slog.String("bookId", r.PathValue("id")))
+		return
+	}
+	writeJSON(w, http.StatusOK, book)
+}
+
 func (a *API) deleteBook(w http.ResponseWriter, r *http.Request, session auth.Session) {
 	id := r.PathValue("id")
-	book, err := a.Books.Delete(session.User.ID, id)
+	book, err := a.Books.Delete(session.User.ID, id, session.User.Role == auth.RoleAdmin)
 	if errors.Is(err, sql.ErrNoRows) {
 		writeError(w, r, http.StatusNotFound, "book not found", nil,
 			slog.String("userId", session.User.ID), slog.String("bookId", id))

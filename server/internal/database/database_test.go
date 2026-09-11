@@ -1,6 +1,7 @@
 package database
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -37,5 +38,21 @@ func TestOpenAppliesSQLiteSettingsAndSchema(t *testing.T) {
 	}
 	if migration != 1 {
 		t.Fatalf("migration version = %d", migration)
+	}
+	var visibility string
+	if err := db.QueryRow(`SELECT visibility FROM books LIMIT 1`).Scan(&visibility); err != nil && err != sql.ErrNoRows {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO users (id, username, password_hash, created_at, updated_at) VALUES ('owner', 'owner', 'hash', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO books (id, user_id, title, original_name, file_path, file_hash, mime_type, file_size, created_at, updated_at) VALUES ('book', 'owner', 'Book', 'book.epub', '/book', 'hash', 'application/epub+zip', 1, 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow(`SELECT visibility FROM books WHERE id = 'book'`).Scan(&visibility); err != nil {
+		t.Fatal(err)
+	}
+	if visibility != "public" {
+		t.Fatalf("visibility default = %q", visibility)
 	}
 }

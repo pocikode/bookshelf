@@ -62,6 +62,7 @@ import {
   personalBookId,
   personalBookToLibraryBook,
   personalDeleteBook,
+  personalUpdateBook,
   personalUploadBook,
 } from '@/services/personal/booksApi';
 import { useAppUrlIngress } from '@/hooks/useAppUrlIngress';
@@ -981,7 +982,12 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
             groupId: resolvedGroupId,
             groupName: resolvedGroupName,
           },
-          { appService, settings: liveSettings, isLoggedIn: !!user, appBooksPrefix },
+          {
+            appService,
+            settings: liveSettings,
+            isLoggedIn: !!user,
+            appBooksPrefix,
+          },
         );
         if (!book) return null;
         successfulImports.push(book.title);
@@ -1113,7 +1119,9 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       }
     }
     if (newFiles.length > 0) {
-      const { failedPaths } = await importBooks(newFiles, undefined, { silent: true });
+      const { failedPaths } = await importBooks(newFiles, undefined, {
+        silent: true,
+      });
       for (const p of failedPaths) {
         const key = normalizeFilePathForIndex(p, osPlatform);
         if (key) autoImportFailedPathsRef.current.add(key);
@@ -1156,14 +1164,22 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     return async (book: Book, syncBooks = true) => {
       const deletionMessages = {
         both: _('Book deleted: {{title}}', { title: book.title }),
-        cloud: _('Deleted cloud backup of the book: {{title}}', { title: book.title }),
-        local: _('Deleted local copy of the book: {{title}}', { title: book.title }),
+        cloud: _('Deleted cloud backup of the book: {{title}}', {
+          title: book.title,
+        }),
+        local: _('Deleted local copy of the book: {{title}}', {
+          title: book.title,
+        }),
         purge: _('Purged book data: {{title}}', { title: book.title }),
       };
       const deletionFailMessages = {
         both: _('Failed to delete book: {{title}}', { title: book.title }),
-        cloud: _('Failed to delete cloud backup of the book: {{title}}', { title: book.title }),
-        local: _('Failed to delete local copy of the book: {{title}}', { title: book.title }),
+        cloud: _('Failed to delete cloud backup of the book: {{title}}', {
+          title: book.title,
+        }),
+        local: _('Failed to delete local copy of the book: {{title}}', {
+          title: book.title,
+        }),
         purge: _('Failed to purge book data: {{title}}', { title: book.title }),
       };
 
@@ -1171,6 +1187,11 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
         if (process.env['NEXT_PUBLIC_PERSONAL_APP'] === 'true') {
           const id = personalBookId(book);
           if (!id) throw new Error('Personal book is missing its server id');
+          const ownerId = (book as Book & { ownerId?: string }).ownerId;
+          const isAdmin = user?.user_metadata?.['role'] === 'admin';
+          if (ownerId && ownerId !== user?.id && !isAdmin) {
+            throw new Error("You cannot delete another user's book");
+          }
           await personalDeleteBook(id);
           const remainingBooks = useLibraryStore
             .getState()
@@ -1247,6 +1268,27 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     // object (which React holds as the previous snapshot) makes the comparator
     // see no change and the library cover only refreshes after a full reload.
     const updatedBook = getBookWithUpdatedMetadata(book, metadata, tags);
+    if (isPersonal) {
+      const id = personalBookId(book);
+      if (!id) throw new Error('Personal book is missing its server id');
+      const serverMetadata = { ...metadata };
+      delete serverMetadata.coverImageBlobUrl;
+      delete serverMetadata.coverImageFile;
+      delete serverMetadata.coverImageUrl;
+      const saved = await personalUpdateBook(id, {
+        title: updatedBook.title,
+        author: updatedBook.author,
+        metadata: serverMetadata,
+        visibility: (book as Book & { visibility?: 'public' | 'private' }).visibility ?? 'public',
+      });
+      const personalBook = personalBookToLibraryBook(saved);
+      const nextLibrary = useLibraryStore
+        .getState()
+        .library.map((candidate) => (personalBookId(candidate) === id ? personalBook : candidate));
+      setLibrary(nextLibrary);
+      setShowDetailsBook(personalBook);
+      return;
+    }
     if (metadata.coverImageBlobUrl || metadata.coverImageUrl || metadata.coverImageFile) {
       try {
         await appService?.updateCoverImage(
@@ -1295,6 +1337,38 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
     metadata.coverImageBlobUrl = undefined;
     metadata.coverImageFile = undefined;
     await updateBook(envConfig, updatedBook);
+  };
+
+  const handlePersonalVisibilityUpdate = async (book: Book, visibility: 'public' | 'private') => {
+    if (!isPersonal || !user) return;
+    const ownerId = (book as Book & { ownerId?: string }).ownerId;
+    if (ownerId && ownerId !== user.id) return;
+    const id = personalBookId(book);
+    if (!id) return;
+    try {
+      const saved = await personalUpdateBook(id, {
+        title: book.title,
+        author: book.author,
+        metadata: book.metadata ?? {
+          title: book.title,
+          author: book.author,
+          language: 'en',
+        },
+        visibility,
+      });
+      const personalBook = personalBookToLibraryBook(saved);
+      const nextLibrary = useLibraryStore
+        .getState()
+        .library.map((candidate) => (personalBookId(candidate) === id ? personalBook : candidate));
+      setLibrary(nextLibrary);
+      setShowDetailsBook(personalBook);
+    } catch (error) {
+      console.warn('Failed to update book visibility:', error);
+      eventDispatcher.dispatch('toast', {
+        type: 'error',
+        message: _('Failed to update book visibility.'),
+      });
+    }
   };
 
   const handleMetadataValueClick = (type: 'tag' | 'subject', value: string) => {
@@ -1358,7 +1432,10 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       ms: Math.round(performance.now() - t1),
     });
     const groupId = searchParams?.get('group') || '';
-    console.log('[clip] importing locally', { name: book.file.name, groupId: groupId || null });
+    console.log('[clip] importing locally', {
+      name: book.file.name,
+      groupId: groupId || null,
+    });
     await importBooks([{ file: book.file }], groupId);
     console.log('[clip] done');
   };
@@ -1881,6 +1958,14 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
   }
 
   const showBookshelf = libraryLoaded || (!isPersonal && libraryBooks.length > 0);
+  const shownPersonalBook = showDetailsBook as
+    | (Book & { ownerId?: string; visibility?: 'public' | 'private' })
+    | null;
+  const canManageShownPersonalBook =
+    !isPersonal ||
+    !shownPersonalBook?.ownerId ||
+    shownPersonalBook.ownerId === user?.id ||
+    user?.user_metadata?.['role'] === 'admin';
 
   return (
     <div
@@ -2053,7 +2138,10 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
                 onSearchProgress={setLibrarySearchProgress}
                 contentSearch={
                   librarySearchTarget === 'text'
-                    ? { query: searchParams?.get('q') ?? '', config: librarySearchConfig }
+                    ? {
+                        query: searchParams?.get('q') ?? '',
+                        config: librarySearchConfig,
+                      }
                     : null
                 }
               />
@@ -2083,24 +2171,51 @@ const LibraryPageContent = ({ searchParams }: { searchParams: ReadonlyURLSearchP
       )}
       <NowPlayingBar isSelectMode={isSelectMode} />
       {showDetailsBook && (
-        <BookDetailModal
-          isOpen={!!showDetailsBook}
-          book={showDetailsBook}
-          onClose={() => setShowDetailsBook(null)}
-          handleBookUpload={handleBookUpload}
-          handleBookDownload={handleBookDownload}
-          handleBookDelete={handleBookDelete('both')}
-          // Readest storage only. A third-party provider mirrors the library, so
-          // removing just its cloud copy is not expressible: the next sync would
-          // upload the still-local book straight back (#5084).
-          handleBookDeleteCloudBackup={
-            isReadestCloudStorageActive(settings) ? handleBookDelete('cloud') : undefined
-          }
-          handleBookDeleteLocalCopy={handleBookDelete('local')}
-          handleBookPurge={handleBookDelete('purge')}
-          handleBookMetadataUpdate={handleUpdateMetadata}
-          onMetadataValueClick={handleMetadataValueClick}
-        />
+        <>
+          <BookDetailModal
+            isOpen={!!showDetailsBook}
+            book={showDetailsBook}
+            onClose={() => setShowDetailsBook(null)}
+            handleBookUpload={handleBookUpload}
+            handleBookDownload={handleBookDownload}
+            handleBookDelete={canManageShownPersonalBook ? handleBookDelete('both') : undefined}
+            // Readest storage only. A third-party provider mirrors the library, so
+            // removing just its cloud copy is not expressible: the next sync would
+            // upload the still-local book straight back (#5084).
+            handleBookDeleteCloudBackup={
+              isReadestCloudStorageActive(settings) ? handleBookDelete('cloud') : undefined
+            }
+            handleBookDeleteLocalCopy={handleBookDelete('local')}
+            handleBookPurge={handleBookDelete('purge')}
+            handleBookMetadataUpdate={
+              isPersonal && shownPersonalBook?.ownerId !== user?.id
+                ? undefined
+                : handleUpdateMetadata
+            }
+            onMetadataValueClick={handleMetadataValueClick}
+          />
+          {isPersonal && shownPersonalBook?.ownerId === user?.id && (
+            <div className='fixed bottom-5 left-1/2 z-[60] flex -translate-x-1/2 items-center gap-2 rounded-lg border border-base-300 bg-base-100 px-3 py-2 shadow-lg'>
+              <label htmlFor='personal-book-visibility' className='text-sm'>
+                {_('Visibility')}
+              </label>
+              <select
+                id='personal-book-visibility'
+                className='eink-bordered rounded border border-base-300 bg-base-100 px-2 py-1 text-sm'
+                value={shownPersonalBook!.visibility ?? 'public'}
+                onChange={(event) =>
+                  void handlePersonalVisibilityUpdate(
+                    shownPersonalBook!,
+                    event.target.value as 'public' | 'private',
+                  )
+                }
+              >
+                <option value='public'>{_('Public')}</option>
+                <option value='private'>{_('Private')}</option>
+              </select>
+            </div>
+          )}
+        </>
       )}
       {isTransferQueueOpen && (
         <ModalPortal>

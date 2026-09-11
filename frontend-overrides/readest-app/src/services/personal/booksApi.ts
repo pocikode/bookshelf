@@ -6,16 +6,23 @@ import { svg2png } from '@/utils/svg';
 
 export interface PersonalBook {
   id: string;
+  ownerId: string;
   title: string;
   author: string;
   filename: string;
   mimeType: string;
   size: number;
   hash: string;
+  visibility: 'public' | 'private';
   metadata: BookMetadata;
   createdAt: number;
   updatedAt: number;
 }
+
+type PersonalLibraryBook = Book & {
+  ownerId: string;
+  visibility: PersonalBook['visibility'];
+};
 
 export const personalBooks = (query = '') =>
   personalRequest<PersonalBook[]>(`/books${query ? `?q=${encodeURIComponent(query)}` : ''}`, {
@@ -25,7 +32,7 @@ export const personalBooks = (query = '') =>
 export const personalBookFile = (id: string) => `/api/books/${encodeURIComponent(id)}/file`;
 export const personalBookCover = (id: string) => `/api/books/${encodeURIComponent(id)}/cover`;
 
-export const personalBookToLibraryBook = (book: PersonalBook): Book => ({
+export const personalBookToLibraryBook = (book: PersonalBook): PersonalLibraryBook => ({
   hash: book.hash,
   format: book.mimeType === 'application/pdf' ? 'PDF' : 'EPUB',
   title: book.title,
@@ -35,6 +42,8 @@ export const personalBookToLibraryBook = (book: PersonalBook): Book => ({
   coverImageUrl: personalBookCover(book.id),
   createdAt: book.createdAt,
   updatedAt: book.updatedAt,
+  ownerId: book.ownerId,
+  visibility: book.visibility,
 });
 
 export const personalBookId = (book: Book) => {
@@ -43,7 +52,18 @@ export const personalBookId = (book: Book) => {
 };
 
 export const personalDeleteBook = (id: string) =>
-  personalRequest<void>(`/books/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  personalRequest<void>(`/books/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
+export const personalUpdateBook = (
+  id: string,
+  input: Pick<PersonalBook, 'title' | 'author' | 'metadata' | 'visibility'>,
+) =>
+  personalRequest<PersonalBook>(`/books/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  });
 
 export const personalUploadBook = async (file: File) => {
   const form = new FormData();
@@ -66,5 +86,8 @@ export const personalUploadBook = async (file: File) => {
     await bookDoc?.destroy?.();
   }
 
-  return personalRequest<PersonalBook>('/books', { method: 'POST', body: form });
+  return personalRequest<PersonalBook>('/books', {
+    method: 'POST',
+    body: form,
+  });
 };

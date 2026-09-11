@@ -8,7 +8,11 @@ vi.mock('@/libs/document', () => ({
     async open() {
       return {
         book: {
-          metadata: { title: 'Extracted title', author: 'Extracted author', language: 'en' },
+          metadata: {
+            title: 'Extracted title',
+            author: 'Extracted author',
+            language: 'en',
+          },
           getCover,
           destroy,
         },
@@ -24,6 +28,7 @@ import {
   personalBookId,
   personalBookToLibraryBook,
   personalDeleteBook,
+  personalUpdateBook,
   personalUploadBook,
 } from './booksApi';
 
@@ -36,6 +41,7 @@ describe('personal books API', () => {
         new Response(
           JSON.stringify({
             id: 'server-id',
+            ownerId: 'owner-id',
             hash: 'content-hash',
             title: 'Extracted title',
             author: 'Extracted author',
@@ -43,6 +49,7 @@ describe('personal books API', () => {
             mimeType: 'application/epub+zip',
             size: 4,
             metadata: {},
+            visibility: 'public',
             createdAt: 1,
             updatedAt: 1,
           }),
@@ -64,7 +71,9 @@ describe('personal books API', () => {
     const body = init?.body as FormData;
     expect(body.get('title')).toBe('Extracted title');
     expect(body.get('author')).toBe('Extracted author');
-    expect(JSON.parse(body.get('metadata') as string)).toMatchObject({ title: 'Extracted title' });
+    expect(JSON.parse(body.get('metadata') as string)).toMatchObject({
+      title: 'Extracted title',
+    });
     expect(body.get('cover')).toBeInstanceOf(File);
     expect(destroy).toHaveBeenCalledOnce();
   });
@@ -72,6 +81,7 @@ describe('personal books API', () => {
   test('uses the content hash for reading and the server id for API calls', () => {
     const book = personalBookToLibraryBook({
       id: 'server-id',
+      ownerId: 'owner-id',
       hash: 'content-hash',
       title: 'Book',
       author: 'Author',
@@ -79,6 +89,7 @@ describe('personal books API', () => {
       mimeType: 'application/epub+zip',
       size: 4,
       metadata: {} as never,
+      visibility: 'public',
       createdAt: 1,
       updatedAt: 2,
     });
@@ -97,6 +108,35 @@ describe('personal books API', () => {
     expect(fetch).toHaveBeenCalledWith(
       '/api/books/server-id',
       expect.objectContaining({ method: 'DELETE', credentials: 'include' }),
+    );
+  });
+
+  test('updates metadata and visibility by server id', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ id: 'server-id' }), {
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    await personalUpdateBook('server-id', {
+      title: 'Updated title',
+      author: 'Updated author',
+      metadata: {} as never,
+      visibility: 'private',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      '/api/books/server-id',
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify({
+          title: 'Updated title',
+          author: 'Updated author',
+          metadata: {},
+          visibility: 'private',
+        }),
+        credentials: 'include',
+      }),
     );
   });
 
