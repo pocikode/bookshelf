@@ -36,6 +36,9 @@ if command -v rsync >/dev/null 2>&1; then
     --archive
     --delete
     --exclude 'node_modules/'
+    --exclude '/bun.lock'
+    --exclude '/package.json'
+    --exclude '/.package.json.source'
     --exclude '/.git/'
     --exclude '/.gitmodules'
     --exclude '/apps/readest-app/.next/'
@@ -73,6 +76,37 @@ for file in "${override_files[@]}"; do
   fi
 done
 
+# Bun only understands the monorepo workspace + dependency overrides when they
+# live in package.json, but upstream keeps them in pnpm-workspace.yaml. Merge
+# them into the mirrored tree so `bun install` links the workspace packages and
+# honours the overrides (this is what pins e.g. pdfjs-dist / @napi-rs/canvas).
+#
+# `package.json` is excluded from the rsync above so the incremental mirror does
+# not clobber the merged version and invalidate the Next.js cache on every run.
+# We instead re-seed it from the source only when the source file actually
+# changes (tracked via a small marker), then merge in place.
+pkg_marker="$build/.package.json.source"
+if [[ ! -f "$build/package.json" ]] || ! cmp -s "$source/package.json" "$pkg_marker"; then
+  cp -p "$source/package.json" "$build/package.json"
+  cp -p "$source/package.json" "$pkg_marker"
+fi
+if [[ -f "$build/pnpm-workspace.yaml" ]]; then
+  bun "$root/scripts/prepare-readest-package.js" "$build"
+fi
+
+# Install once, in the build tree. `readest/` itself is never installed or read
+# by the build (every build/typecheck/lint script points at `.build/readest`),
+# so no second dependency tree is created there.
+#
+# `scripts/readest.lock` is the committed source of truth for resolved versions
+# (upstream ships no Bun lockfile, and its pnpm lockfile is not used by Bun).
+# Seed it before installing so a clean checkout resolves deterministically
+# instead of drifting to newer transitive versions. Regenerate it with:
+#   cp .build/readest/bun.lock scripts/readest.lock
+lockfile="$root/scripts/readest.lock"
+if [[ ! -f "$build/bun.lock" && -f "$lockfile" ]]; then
+  cp -p "$lockfile" "$build/bun.lock"
+fi
 bun install --cwd "$build" --no-save
 
 mkdir -p "$build/apps/readest-app/public/vendor/pdfjs" "$build/apps/readest-app/public/vendor/simplecc"
